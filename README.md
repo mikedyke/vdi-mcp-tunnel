@@ -41,13 +41,13 @@ release zip through your file-ingress → Install Plugin from Disk. Keep the rep
 internal GitHub Enterprise) — this is an in-house DLP-boundary tool.
 
 **Host (Windows):**
-1. `pip install -r host/requirements.txt` (pyzbar bundles zbar on Windows).
+1. `pip install -r host/requirements.txt`.
 2. `claude mcp add vdi-tunnel -- python -m vdi_tunnel` (run from `host/`).
 
 ## What's implemented vs TODO
 Implemented (real logic): framing + zlib codec + CRC (both langs), LT fountain encode/decode
 (both langs, tested on the Python side incl. a dropped-frame case), host ARQ uplink + QR
-downlink orchestration, SendInput driver, mss+ArUco+pyzbar capture/decode, MCP stdio proxy
+downlink orchestration, SendInput driver, mss+ArUco+zxing-cpp capture/decode, MCP stdio proxy
 with tools/list disk cache, bridge tool window + state machine + ZXing QR render.
 
 TODO before end-to-end:

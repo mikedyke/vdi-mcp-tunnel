@@ -6,14 +6,19 @@ fixed fractional offsets within the rectified panel (set once, see PANEL_LAYOUT)
 import numpy as np
 import cv2
 import mss
-from pyzbar import pyzbar
+import zxingcpp
 
-# Fractional offsets inside the rectified panel (0..1). TUNE to the real plugin layout.
+# Fractional offsets inside the rectified panel (0..1), measured live 2026-07-20
+# against bridge v0.1.1 (canvas ~896x805 px in the VDI). The unit rectangle spans the
+# 4 marker CENTRES; the textarea sits below the canvas, hence fy > 1.0 (the homography
+# extrapolates). Downlink QR fractions shift if the tool window is resized (QR px capped
+# at 420) — qr_roi is generous but must stay clear of heartbeat_roi so settle detection
+# isn't confused by the other QR.
 PANEL_LAYOUT = dict(
-    qr_roi=(0.05, 0.05, 0.90, 0.55),        # x, y, w, h  (main downlink QR)
-    heartbeat_roi=(0.80, 0.80, 0.18, 0.18), # small corner QR
-    textarea_point=(0.50, 0.90),            # click here to focus input
-    focus_probe=(0.05, 0.72, 0.90, 0.04),   # region whose colour flips when focused
+    qr_roi=(0.10, 0.02, 0.80, 0.68),        # x, y, w, h  (main downlink QR)
+    heartbeat_roi=(0.74, 0.71, 0.25, 0.27), # small corner QR (measured 0.78..0.92 x, 0.76..0.91 y)
+    textarea_point=(0.50, 1.11),            # click here to focus input (below bottom markers)
+    focus_probe=(0.035, 0.656, 0.93, 0.05), # green/red bar; colour flips when focused
 )
 
 ARUCO_DICT = cv2.aruco.DICT_4X4_50
@@ -72,11 +77,11 @@ def _roi(img, frac):
     return img[int(y*h):int((y+rh)*h), int(x*w):int((x+rw)*w)]
 
 def decode_qr(img) -> list[bytes]:
-    """Return raw byte payloads of all QR codes found (data QRs use BYTE mode)."""
-    out = []
-    for sym in pyzbar.decode(img, symbols=[pyzbar.ZBarSymbol.QRCODE]):
-        out.append(sym.data)
-    return out
+    """Return raw byte payloads of all QR codes found (data QRs use BYTE mode).
+    zxing-cpp, not pyzbar: the bundled Windows zbar DLL hard-crashes the process
+    (access violation, no traceback) on exactly the bridge's binary QR frames."""
+    return [bytes(r.bytes) for r in
+            zxingcpp.read_barcodes(img, formats=zxingcpp.BarcodeFormat.QRCode)]
 
 def read_downlink(img, calib):    return decode_qr(_roi(rectify(img, calib), PANEL_LAYOUT["qr_roi"]))
 def read_heartbeat(img, calib):   return decode_qr(_roi(rectify(img, calib), PANEL_LAYOUT["heartbeat_roi"]))
