@@ -6,7 +6,7 @@ One request/response cycle:
   3. type REQ frames with stop-and-wait ARQ (heartbeat.rx_hash acks each chunk)
   4. read animated RESP QR frames until the LT decoder reconstructs; verify SHA-256
 """
-import time, itertools
+import sys, time, itertools
 from . import protocol as P
 from . import vision as V
 from . import winput as W
@@ -86,31 +86,41 @@ class Tunnel:
 
     # ---------- downlink ----------
     def _read_response(self, calib, gen_id) -> bytes:
-        dec = None; meta = None; prev = None
-        deadline = time.time() + 30
+        """Read the LT-coded RESP QR animation. The bridge cycles a fixed set of QR
+        frames; we grab as fast as we can, decode every QR in the whole panel, and feed
+        each distinct symbol to the fountain decoder until it reconstructs. No stable()
+        gating — the QR is a crisp rendered image, and gating fought the animation."""
+        dec = None; meta = None
+        seen: set[int] = set()
+        deadline = time.time() + self.cfg.downlink_timeout_s
+        last_log = time.time()
         while time.time() < deadline:
-            img = self.screen.grab()
-            roi = V._roi(V.rectify(img, calib), V.PANEL_LAYOUT["qr_roi"])
-            if not V.stable(prev, roi):        # wait for the frame to settle
-                prev = roi; time.sleep(1.0 / self.cfg.downlink_fps / 2); continue
-            prev = roi
-            for raw in V.decode_qr(roi):
+            for raw in V.read_all(self.screen.grab(), calib):
                 try:
                     f = P.unpack_resp(raw)
                 except Exception:
                     continue
                 if f["type"] != P.TYPE_RESP or f["gen_id"] != gen_id:
-                    continue
+                    continue        # heartbeat QR or a stale generation
                 if dec is None:
                     meta = f
                     dec = Decoder(f["k"], f["payload_len"], self.cfg.symbol_size, self.cfg.dmax)
+                if f["symbol_id"] in seen:
+                    continue
+                seen.add(f["symbol_id"])
                 if dec.add(f["symbol_id"], f["symbol"]):
                     payload = dec.result()
                     if P.sha_tail(payload) != meta["sha"]:
                         raise TunnelError("SHA mismatch after reconstruction")
                     return P.decompress(meta["codec"], payload)
-            time.sleep(1.0 / self.cfg.downlink_fps)
-        raise TunnelError("downlink timeout")
+            if dec is not None and time.time() - last_log > 3:
+                last_log = time.time()
+                # progress breadcrumb for large replies (K symbols needed)
+                print(f"[downlink] gen={gen_id} k={meta['k']} symbols={len(seen)}",
+                      file=sys.stderr, flush=True)
+            time.sleep(0.03)
+        need = meta["k"] if meta else "?"
+        raise TunnelError(f"downlink timeout ({len(seen)} symbols seen, need k={need})")
 
     # ---------- public ----------
     def request(self, mcp_json: bytes) -> bytes:

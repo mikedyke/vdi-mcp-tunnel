@@ -12,6 +12,7 @@ class Config:
     qr_ecc: str = "Q"
     module_min_px: int = 3
     downlink_fps: int = 3
+    downlink_timeout_s: int = 120   # large replies span many cycled QR frames
     settle_stable_frames: int = 2   # identical grabs before decoding
     # --- Heartbeat / ARQ ---
     heartbeat_timeout_ms: int = 3000
