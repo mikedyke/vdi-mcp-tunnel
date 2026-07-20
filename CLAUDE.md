@@ -31,7 +31,7 @@ Any change to framing, the fountain PRNG (`GOLDEN`, `lcg`, `seed`, high-bits dra
 - No test suite exists yet; there is no linter config.
 
 **Bridge (Kotlin IntelliJ plugin):**
-- `cd bridge-plugin && gradle buildPlugin` → `build/distributions/vdi-tunnel-bridge-*.zip` (JDK 21, Gradle 8.5+; CI uses 8.13). First local build downloads the ~1 GB IDE SDK — prefer CI.
+- `cd bridge-plugin && gradle buildPlugin` → `build/distributions/vdi-tunnel-bridge-*.zip` (JDK 21, Gradle 9.0+ — required by IntelliJ Platform Gradle Plugin 2.18+; CI uses 9.6.1). First local build downloads the ~1 GB IDE SDK — prefer CI.
 - CI (`.github/workflows/build.yml`) builds on every push/PR and uploads the zip as an artifact; pushing a tag `vX.Y.Z` publishes a GitHub Release with the zip.
 - `bridge-plugin/gradle.properties` → `platformVersion` must be pinned to the VDI IDE's exact build; `pluginVersion` is injected into plugin.xml.
 
