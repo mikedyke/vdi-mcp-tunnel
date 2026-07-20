@@ -1,6 +1,7 @@
 plugins {
     id("java")
-    id("org.jetbrains.kotlin.jvm") version "2.0.20"
+    // Must be able to read the Kotlin metadata of the target IDE's jars (2026.2 ships 2.4.0).
+    id("org.jetbrains.kotlin.jvm") version "2.4.10"
     id("org.jetbrains.intellij.platform") version "2.18.1"   // 2.x — required for 2024.2+ / 2026.x SDKs
 }
 
