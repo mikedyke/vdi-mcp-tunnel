@@ -16,9 +16,10 @@ repositories {
 
 dependencies {
     intellijPlatform {
-        // Match the VDI IDE. Community is enough for a plain tool window.
-        // Pin to your exact build from Help > About (e.g. "2026.2.1") in gradle.properties.
-        intellijIdeaCommunity(providers.gradleProperty("platformVersion").get())
+        // Match the VDI IDE. Pin to your exact build from Help > About (e.g. "2026.2.1")
+        // in gradle.properties. Community (IC) is no longer published since 2025.3 —
+        // the unified intellijIdea distribution replaces it.
+        intellijIdea(providers.gradleProperty("platformVersion").get())
     }
     implementation("com.google.zxing:core:3.5.3")   // bundled into the plugin distribution
 }
