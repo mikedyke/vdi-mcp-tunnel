@@ -8,9 +8,9 @@ import java.util.concurrent.atomic.AtomicReference
  *  The panel polls [heartbeatImage] and [currentDownlinkImage] to paint. */
 class TunnelController(
     private val ide: McpLocalClient,
-    private val symbolSize: Int = 150,
+    private val symbolSize: Int = 512,        // MUST equal host Config.symbol_size
     private val dmax: Int = 8,
-    private val qrPx: Int = 512,
+    private val qrPx: Int = 720,              // render resolution; panel scales to fit
     private val repairRatio: Double = 0.25,   // extra repair symbols beyond K
 ) {
     enum class State(val code: Int) { IDLE(0), RECEIVING(1), FORWARDING(2), SENDING(3), ERROR(4) }

@@ -31,8 +31,9 @@ class TunnelPanel(private val controller: TunnelController) : JPanel(BorderLayou
             override fun changedUpdate(e: DocumentEvent) {}
         })
 
-        // downlink animation + heartbeat repaint
-        Timer(1000 / 3) { canvas.repaint() }.start()   // downlink_fps
+        // downlink animation + heartbeat repaint. Each paint advances one RESP symbol;
+        // 6 fps roughly halves large-reply transfer time vs 3 (host capture keeps up).
+        Timer(1000 / 6) { canvas.repaint() }.start()   // downlink fps
     }
 
     /** Turn newline-terminated content into complete lines fed to the controller. */
@@ -67,9 +68,10 @@ class TunnelPanel(private val controller: TunnelController) : JPanel(BorderLayou
             drawMarker(g2, 2, width - M, height - M)
             drawMarker(g2, 3, 0, height - M)
 
-            // main downlink QR (centre-upper) — must sit inside PANEL_LAYOUT.qr_roi on the host
+            // main downlink QR (centre-upper). Drawn as large as the panel allows so the
+            // higher-density QR stays capturable — widen the tool window for best throughput.
             controller.currentDownlinkImage()?.let {
-                val s = minOf(width - 2 * M - 20, 420)
+                val s = minOf(width - 2 * M - 20, 640)
                 g2.drawImage(it, (width - s) / 2, M + 10, s, s, null)
             }
 

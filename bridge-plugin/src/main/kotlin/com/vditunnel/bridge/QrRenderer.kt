@@ -8,7 +8,9 @@ import java.awt.image.BufferedImage
 
 /** Renders raw frame bytes to a QR BufferedImage in BYTE mode (Latin-1 = 1 char/byte). */
 object QrRenderer {
-    fun render(frame: ByteArray, sizePx: Int, ecc: ErrorCorrectionLevel = ErrorCorrectionLevel.Q): BufferedImage {
+    // ECC M (15%): the screen->capture path is clean, and the LT fountain + CRC already
+    // recover dropped/garbled frames, so we spend QR capacity on payload instead of on Q.
+    fun render(frame: ByteArray, sizePx: Int, ecc: ErrorCorrectionLevel = ErrorCorrectionLevel.M): BufferedImage {
         val text = String(frame, Charsets.ISO_8859_1)
         val hints = mapOf(
             EncodeHintType.ERROR_CORRECTION to ecc,
