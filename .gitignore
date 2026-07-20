@@ -1,0 +1,26 @@
+# --- Gradle / build ---
+.gradle/
+build/
+bridge-plugin/.gradle/
+bridge-plugin/build/
+
+# --- IntelliJ / editor ---
+.idea/
+*.iml
+out/
+
+# --- Python (host) ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+host/tools_cache.json          # runtime cache, not source
+
+# --- Local helper scripts ---
+claude.bat
+
+# --- OS cruft ---
+.DS_Store
+Thumbs.db
+
+# NOTE: keep the private repo private — this is an in-house DLP-boundary tool.

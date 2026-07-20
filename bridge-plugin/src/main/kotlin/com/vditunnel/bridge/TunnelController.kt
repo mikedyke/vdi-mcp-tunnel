@@ -1,0 +1,94 @@
+package com.vditunnel.bridge
+
+import java.awt.image.BufferedImage
+import java.util.concurrent.atomic.AtomicReference
+
+/** Owns the tunnel state machine on the VDI side:
+ *  reassemble typed REQ frames -> forward to IDE MCP server -> LT-encode reply into RESP QR frames.
+ *  The panel polls [heartbeatImage] and [currentDownlinkImage] to paint. */
+class TunnelController(
+    private val ide: McpLocalClient,
+    private val symbolSize: Int = 150,
+    private val dmax: Int = 8,
+    private val qrPx: Int = 512,
+    private val repairRatio: Double = 0.25,   // extra repair symbols beyond K
+) {
+    enum class State(val code: Int) { IDLE(0), RECEIVING(1), FORWARDING(2), SENDING(3), ERROR(4) }
+
+    @Volatile var state = State.IDLE
+    @Volatile var genId = 0
+    @Volatile var rxHash = 0L
+    @Volatile var schemaHash = 0L
+
+    private val chunks = HashMap<Int, ByteArray>()   // seq -> chunk
+    private var expectedTotal = -1
+    private var reqCodec = 0
+
+    // downlink symbols (rendered QR) cycled by the panel
+    private val downFrames = AtomicReference<List<BufferedImage>>(emptyList())
+    @Volatile private var downIdx = 0
+
+    // ---- uplink: called per completed textarea line ----
+    fun acceptLine(line: String) {
+        if (line.trim() == "END") { finishRequest(); return }
+        val r = Protocol.parseReqLine(line) ?: return
+        if (state != State.RECEIVING || r.genId != genId) {   // new request
+            chunks.clear(); rxHash = 0L; genId = r.genId; state = State.RECEIVING
+        }
+        if (!chunks.containsKey(r.seq)) {
+            chunks[r.seq] = r.chunk
+            rxHash = Protocol.rollingAck(rxHash, r.chunk)   // ACK surfaced via heartbeat
+            expectedTotal = r.total; reqCodec = r.codec
+        }
+    }
+
+    private fun finishRequest() {
+        if (expectedTotal <= 0 || chunks.size < expectedTotal) return
+        state = State.FORWARDING
+        val comp = ByteArray(chunks.values.sumOf { it.size }).also {
+            var o = 0; for (s in 0 until expectedTotal) { val c = chunks[s]!!; c.copyInto(it, o); o += c.size }
+        }
+        val mcpJson = String(inflateIfNeeded(reqCodec, comp), Charsets.UTF_8)
+        val reply = try { ide.call(mcpJson) } catch (e: Exception) { errorReply(e.message) }
+        sendResponse(reply.toByteArray(Charsets.UTF_8))
+    }
+
+    private fun inflateIfNeeded(codec: Int, data: ByteArray): ByteArray {
+        if (codec == 0) return data
+        val inf = java.util.zip.Inflater(); inf.setInput(data)
+        val out = java.io.ByteArrayOutputStream(); val buf = ByteArray(4096)
+        while (!inf.finished()) { val n = inf.inflate(buf); if (n == 0) break; out.write(buf, 0, n) }
+        return out.toByteArray()
+    }
+
+    // ---- downlink: LT-encode reply into a cycling QR animation ----
+    private fun sendResponse(payloadRaw: ByteArray) {
+        val (codec, payload) = Protocol.compress(payloadRaw)
+        val k = (payload.size + symbolSize - 1) / symbolSize
+        val nSymbols = k + Math.ceil(k * repairRatio).toInt() + 2
+        val sha = Protocol.shaTail(payload)
+        val imgs = ArrayList<BufferedImage>(nSymbols)
+        for (s in 0 until nSymbols) {
+            val symbol = Fountain.encodeSymbol(payload, s, symbolSize, dmax)
+            val frame = Protocol.packResp(genId, s, k, payload.size, codec, sha, symbol)
+            imgs.add(QrRenderer.render(frame, qrPx))
+        }
+        downFrames.set(imgs); downIdx = 0
+        state = State.SENDING
+    }
+
+    private fun errorReply(msg: String?): String =
+        """{"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":${'"'}${msg ?: "ide error"}${'"'}}}"""
+
+    // ---- panel accessors ----
+    fun currentDownlinkImage(): BufferedImage? {
+        val f = downFrames.get(); if (f.isEmpty()) return null
+        val img = f[downIdx % f.size]; downIdx++   // advance each paint tick
+        return img
+    }
+
+    fun heartbeatImage(qrPx: Int): BufferedImage {
+        val frame = Protocol.packHeartbeat(genId, state.code, rxHash, 1, schemaHash)
+        return QrRenderer.render(frame, qrPx)
+    }
+}

@@ -1,0 +1,4 @@
+mss>=9.0
+opencv-contrib-python>=4.9   # provides cv2.aruco
+numpy>=1.26
+pyzbar>=0.1.9                # needs native zbar; bundled in the Windows wheel

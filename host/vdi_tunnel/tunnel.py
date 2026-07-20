@@ -1,0 +1,109 @@
+"""Ties uplink (ARQ typing) + downlink (QR capture/decode) into request()->response.
+
+One request/response cycle:
+  1. locate panel (ArUco) -> Calibration
+  2. click textarea, verify focus glyph
+  3. type REQ frames with stop-and-wait ARQ (heartbeat.rx_hash acks each chunk)
+  4. read animated RESP QR frames until the LT decoder reconstructs; verify SHA-256
+"""
+import time, itertools
+from . import protocol as P
+from . import vision as V
+from . import winput as W
+from .fountain import Decoder
+
+class TunnelError(Exception): ...
+
+class Tunnel:
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.screen = V.Screen()
+        self._gen = itertools.count(1)
+
+    # ---------- calibration / heartbeat ----------
+    def _calibrate(self):
+        for _ in range(20):
+            calib = V.find_panel(self.screen.grab())
+            if calib:
+                return calib
+            time.sleep(0.1)
+        raise TunnelError("panel not found (bridge tool window visible? fiducials in view?)")
+
+    def _heartbeat(self, calib):
+        for raw in V.read_heartbeat(self.screen.grab(), calib):
+            try:
+                return P.unpack_heartbeat(raw)
+            except Exception:
+                pass
+        return None
+
+    def health(self):
+        calib = self._calibrate()
+        hb = self._heartbeat(calib)
+        return {"alive": hb is not None, **(hb or {})}
+
+    # ---------- uplink ----------
+    def _send_request(self, calib, gen_id, payload: bytes):
+        codec, comp = P.compress(payload)
+        fp = self.cfg.frame_payload
+        chunks = [comp[i:i+fp] for i in range(0, len(comp), fp)] or [b""]
+        total = len(chunks)
+        W.click(*calib.textarea_point()); time.sleep(0.1)
+        # TODO: verify focus glyph via V (PANEL_LAYOUT['focus_probe']) before typing
+        ack = 0
+        for seq, chunk in enumerate(chunks):
+            line = P.req_to_line(P.pack_req(gen_id, seq, total, codec, chunk))
+            expected = P.rolling_ack(ack, chunk)
+            for attempt in range(self.cfg.arq_max_retries):
+                W.type_text(line + "\n", self.cfg.key_interval_ms)
+                if self._await_ack(calib, expected):
+                    ack = expected; break
+                time.sleep(0.1 * (attempt + 1))
+            else:
+                raise TunnelError(f"uplink ARQ failed at chunk {seq}")
+        W.type_text("END\n", self.cfg.key_interval_ms)
+
+    def _await_ack(self, calib, expected):
+        deadline = time.time() + self.cfg.ack_timeout_ms / 1000.0
+        while time.time() < deadline:
+            hb = self._heartbeat(calib)
+            if hb and hb["rx_hash"] == expected:
+                return True
+            time.sleep(0.05)
+        return False
+
+    # ---------- downlink ----------
+    def _read_response(self, calib, gen_id) -> bytes:
+        dec = None; meta = None; prev = None
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            img = self.screen.grab()
+            roi = V._roi(V.rectify(img, calib), V.PANEL_LAYOUT["qr_roi"])
+            if not V.stable(prev, roi):        # wait for the frame to settle
+                prev = roi; time.sleep(1.0 / self.cfg.downlink_fps / 2); continue
+            prev = roi
+            for raw in V.decode_qr(roi):
+                try:
+                    f = P.unpack_resp(raw)
+                except Exception:
+                    continue
+                if f["type"] != P.TYPE_RESP or f["gen_id"] != gen_id:
+                    continue
+                if dec is None:
+                    meta = f
+                    dec = Decoder(f["k"], f["payload_len"], self.cfg.symbol_size, self.cfg.dmax)
+                if dec.add(f["symbol_id"], f["symbol"]):
+                    payload = dec.result()
+                    if P.sha_tail(payload) != meta["sha"]:
+                        raise TunnelError("SHA mismatch after reconstruction")
+                    return P.decompress(meta["codec"], payload)
+            time.sleep(1.0 / self.cfg.downlink_fps)
+        raise TunnelError("downlink timeout")
+
+    # ---------- public ----------
+    def request(self, mcp_json: bytes) -> bytes:
+        """Send a serialized MCP JSON-RPC message, return the serialized reply."""
+        calib = self._calibrate()
+        gen_id = next(self._gen) & 0xFFFF
+        self._send_request(calib, gen_id, mcp_json)
+        return self._read_response(calib, gen_id)
