@@ -62,8 +62,14 @@ def find_panel(frame) -> Calibration | None:
             want[int(i)] = c.reshape(4, 2).mean(axis=0)
     if any(v is None for v in want.values()):
         return None
-    W, H = 1000, 700
-    src = np.float32([want[0], want[1], want[2], want[3]])
+    # Rectify to the panel's ACTUAL pixel size (mean of the two opposite edges) so QR
+    # codes keep their true aspect and stay decodable regardless of how the tool window
+    # is docked/resized. Fractional PANEL_LAYOUT offsets are unaffected (still 0..1).
+    tl, tr, br, bl = want[0], want[1], want[2], want[3]
+    W = int(round((np.linalg.norm(tr - tl) + np.linalg.norm(br - bl)) / 2))
+    H = int(round((np.linalg.norm(bl - tl) + np.linalg.norm(br - tr)) / 2))
+    W, H = max(W, 1), max(H, 1)
+    src = np.float32([tl, tr, br, bl])
     dst = np.float32([[0, 0], [W, 0], [W, H], [0, H]])
     Hmat, _ = cv2.findHomography(src, dst)
     return Calibration(Hmat, (W, H))
@@ -83,8 +89,16 @@ def decode_qr(img) -> list[bytes]:
     return [bytes(r.bytes) for r in
             zxingcpp.read_barcodes(img, formats=zxingcpp.BarcodeFormat.QRCode)]
 
-def read_downlink(img, calib):    return decode_qr(_roi(rectify(img, calib), PANEL_LAYOUT["qr_roi"]))
-def read_heartbeat(img, calib):   return decode_qr(_roi(rectify(img, calib), PANEL_LAYOUT["heartbeat_roi"]))
+def read_all(img, calib) -> list[bytes]:
+    """Decode every QR in the whole rectified panel. The caller classifies by frame
+    type (heartbeat vs RESP), so detection no longer depends on where the plugin
+    happens to render each QR — robust to tool-window resizing/docking."""
+    return decode_qr(rectify(img, calib))
+
+# Back-compat aliases: both readers now scan the full panel; classification is by
+# frame magic/type in protocol.unpack_*, done by the caller in tunnel.py.
+def read_downlink(img, calib):    return read_all(img, calib)
+def read_heartbeat(img, calib):   return read_all(img, calib)
 
 def stable(a, b, thresh=1.0) -> bool:
     """True if two grabs of the same ROI are visually settled (defeats progressive display)."""
