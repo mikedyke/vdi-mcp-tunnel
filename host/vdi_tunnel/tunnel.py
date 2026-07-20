@@ -48,8 +48,7 @@ class Tunnel:
         fp = self.cfg.frame_payload
         chunks = [comp[i:i+fp] for i in range(0, len(comp), fp)] or [b""]
         total = len(chunks)
-        W.click(*calib.textarea_point()); time.sleep(0.1)
-        # TODO: verify focus glyph via V (PANEL_LAYOUT['focus_probe']) before typing
+        self._focus_textarea(calib)
         ack = 0
         for seq, chunk in enumerate(chunks):
             line = P.req_to_line(P.pack_req(gen_id, seq, total, codec, chunk))
@@ -62,6 +61,19 @@ class Tunnel:
             else:
                 raise TunnelError(f"uplink ARQ failed at chunk {seq}")
         W.type_text("END\n", self.cfg.key_interval_ms)
+
+    def _focus_textarea(self, calib):
+        """Click the textarea and confirm the panel's focus bar goes green before typing.
+        Retries the click a few times; raises if the panel never reports focus so we never
+        type keystrokes into the void (or the wrong window)."""
+        for attempt in range(5):
+            W.click(*calib.textarea_point())
+            time.sleep(0.15)
+            focused = V.is_focused(self.screen.grab(), calib)
+            if focused:
+                return
+            time.sleep(0.1 * (attempt + 1))
+        raise TunnelError("textarea never reported focus (bridge panel visible & active?)")
 
     def _await_ack(self, calib, expected):
         deadline = time.time() + self.cfg.ack_timeout_ms / 1000.0

@@ -7,10 +7,22 @@ from ctypes import wintypes
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 
+# Match physical pixels (as mss captures) so image coords == screen coords under HiDPI scaling.
+try:
+    ctypes.WinDLL("shcore").SetProcessDpiAwareness(2)   # PROCESS_PER_MONITOR_DPI_AWARE
+except Exception:
+    try: user32.SetProcessDPIAware()
+    except Exception: pass
+
 INPUT_KEYBOARD, INPUT_MOUSE = 1, 0
 KEYEVENTF_UNICODE, KEYEVENTF_KEYUP = 0x0004, 0x0002
 MOUSEEVENTF_MOVE, MOUSEEVENTF_ABSOLUTE = 0x0001, 0x8000
+MOUSEEVENTF_VIRTUALDESK = 0x4000
 MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP = 0x0002, 0x0004
+
+# System-metric indices for the VIRTUAL desktop (spans all monitors; origin may be negative).
+SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN = 76, 77
+SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 78, 79
 
 class KEYBDINPUT(ctypes.Structure):
     _fields_ = [("wVk", wintypes.WORD), ("wScan", wintypes.WORD),
@@ -51,12 +63,20 @@ def press_enter():
     _vk(0x0D); _vk(0x0D, True)
 
 def click(x: int, y: int):
-    sw = user32.GetSystemMetrics(0); sh = user32.GetSystemMetrics(1)
-    ax = int(x * 65535 / max(sw - 1, 1)); ay = int(y * 65535 / max(sh - 1, 1))
+    """Click at (x, y) given in SCREEN-GRAB pixel coords (mss monitors[0] origin, i.e. the
+    virtual-desktop top-left). Absolute mouse events are normalised to the whole virtual
+    desktop with MOUSEEVENTF_VIRTUALDESK, so clicks reach secondary monitors and monitors
+    at negative offsets (single-monitor primary-only mapping was the multi-screen bug)."""
+    vw = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+    vh = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+    # x,y are already measured from the virtual-desktop origin (mss grabs from there),
+    # so no offset subtraction is needed — just normalise to 0..65535 over the virtual size.
+    ax = int(x * 65535 / max(vw - 1, 1)); ay = int(y * 65535 / max(vh - 1, 1))
+    flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
     move = INPUT(type=INPUT_MOUSE)
-    move.u.mi = MOUSEINPUT(ax, ay, 0, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, 0, None)
+    move.u.mi = MOUSEINPUT(ax, ay, 0, flags, 0, None)
     _send(move); time.sleep(0.02)
     for f in (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP):
         clk = INPUT(type=INPUT_MOUSE)
-        clk.u.mi = MOUSEINPUT(0, 0, 0, f, 0, None)
+        clk.u.mi = MOUSEINPUT(ax, ay, 0, f | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK, 0, None)
         _send(clk); time.sleep(0.01)

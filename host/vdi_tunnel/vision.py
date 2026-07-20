@@ -100,6 +100,19 @@ def read_all(img, calib) -> list[bytes]:
 def read_downlink(img, calib):    return read_all(img, calib)
 def read_heartbeat(img, calib):   return read_all(img, calib)
 
+def is_focused(frame, calib) -> bool | None:
+    """Read the panel's focus bar (green=textarea focused, red=not). Returns True/False,
+    or None if the bar can't be read. Host must confirm True before typing uplink frames."""
+    bar = _roi(rectify(frame, calib), PANEL_LAYOUT["focus_probe"])
+    if bar.size == 0:
+        return None
+    b, g, r = (bar[:, :, i].astype(int) for i in range(3))
+    green = int(((g - r > 40) & (g - b > 40)).sum())
+    red = int(((r - g > 40) & (r - b > 40)).sum())
+    if green == red:
+        return None
+    return green > red
+
 def stable(a, b, thresh=1.0) -> bool:
     """True if two grabs of the same ROI are visually settled (defeats progressive display)."""
     if a is None or b is None or a.shape != b.shape:
