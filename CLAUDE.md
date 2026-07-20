@@ -49,7 +49,7 @@ Any change to framing, the fountain PRNG (`GOLDEN`, `lcg`, `seed`, high-bits dra
 ## Current state (scaffold — not yet end-to-end)
 
 Framing/codec/fountain, ARQ + QR orchestration, capture/decode, proxy, and the bridge tool window are implemented. ArUco markers ship since plugin v0.1.1, and `vision.PANEL_LAYOUT` was measured against the live VDI panel (2026-07-20); heartbeat decode round-trips end-to-end. Known gaps before it runs for real (see README for the full list):
-- IDE MCP transport unconfirmed (SSE vs HTTP-stream + port) — `McpLocalClient.call` is a skeleton.
+- `McpLocalClient` speaks streamable HTTP to the IDE's `/stream` endpoint on 64342 (does its own initialize/session-id handshake since the host proxy answers `initialize` locally) — implemented but not yet exercised against the IDE.
 - Focus-glyph verification before typing (`tunnel._send_request` TODO).
 - Bridge parity unit test against `PROTOCOL.md` vectors.
 - Spec Phase 0: validate over a temporary TCP path before trusting the QR/keyboard channel.

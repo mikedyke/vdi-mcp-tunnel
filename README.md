@@ -31,7 +31,10 @@ the channel. Swap in a shared RaptorQ pair later if you confirm one; the frame l
    Release, or from the workflow run's artifacts. To build locally instead:
    `cd bridge-plugin && gradle buildPlugin` → `build/distributions/vdi-tunnel-bridge-*.zip`.
 5. In the VDI IDE: Settings > Plugins > gear ⚙ > *Install Plugin from Disk…* > pick the zip > restart.
-6. Open the **VDI Tunnel** tool window; set the IDE endpoint via `-Dvdi.ide.mcp.url=…` (open question #1).
+6. Open the **VDI Tunnel** tool window. The IDE endpoint defaults to
+   `http://127.0.0.1:64342/stream` (streamable HTTP); override via `-Dvdi.ide.mcp.url=…`
+   in Help > Edit Custom VM Options if yours differs. Enable the MCP Server in
+   Settings > Tools with Brave Mode ON.
 
 ### CI (GitHub Actions)
 `.github/workflows/build.yml` builds the plugin on every push/PR and uploads the zip as a
@@ -53,7 +56,8 @@ with tools/list disk cache, bridge tool window + state machine + ZXing QR render
 TODO before end-to-end:
 - **Tune `host/vdi_tunnel/vision.PANEL_LAYOUT`** fractional offsets to the real plugin panel.
 - **Add real ArUco markers** (step 2 above) — placeholders won't be detected.
-- **Confirm the IDE MCP endpoint** (SSE vs HTTP-stream + port) and finish `McpLocalClient.call`.
+- **First real request through the tunnel** — the bridge's streamable-HTTP handshake
+  (initialize/session-id/SSE-framed replies) is implemented but untested against the IDE.
 - **Focus-glyph verification** in `tunnel._send_request` before typing (probe `PANEL_LAYOUT.focus_probe`).
 - **Bridge parity unit test** against `PROTOCOL.md` vectors.
 - Validate over a temporary TCP path first (spec Phase 0), then swap in the QR/keyboard channel.
