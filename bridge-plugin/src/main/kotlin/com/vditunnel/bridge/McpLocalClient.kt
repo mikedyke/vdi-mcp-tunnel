@@ -21,10 +21,25 @@ class McpLocalClient(private val baseUrl: String) {
     @Volatile private var sessionId: String? = null
     @Volatile private var protocolVersion = "2025-06-18"
 
-    /** Send one JSON-RPC message string, return the response string. */
+    /** Send one JSON-RPC message string, return the response string. Streamable-HTTP
+     *  sessions are ephemeral: if the IDE has expired ours (HTTP 404 / "session not
+     *  found"), drop it, re-handshake once, and resend. */
     fun call(mcpJson: String): String {
         ensureSession()
-        return extractReply(post(mcpJson))
+        var resp = post(mcpJson)
+        if (sessionLost(resp)) {
+            synchronized(this) { initialized = false; sessionId = null }
+            ensureSession()
+            resp = post(mcpJson)
+        }
+        return extractReply(resp)
+    }
+
+    private fun sessionLost(resp: HttpResponse<String>): Boolean {
+        if (resp.statusCode() == 404) return true
+        val body = resp.body() ?: return false
+        return body.contains("session not found", ignoreCase = true) ||
+               body.contains("session has been closed", ignoreCase = true)
     }
 
     @Synchronized
