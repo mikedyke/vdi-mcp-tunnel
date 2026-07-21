@@ -49,6 +49,7 @@ class Tunnel:
         chunks = [comp[i:i+fp] for i in range(0, len(comp), fp)] or [b""]
         total = len(chunks)
         self._focus_textarea(calib)
+        W.clear_field()     # start each request from an empty textarea (multi-command safe)
         ack = 0
         for seq, chunk in enumerate(chunks):
             line = P.req_to_line(P.pack_req(gen_id, seq, total, codec, chunk))

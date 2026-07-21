@@ -27,7 +27,12 @@ class TunnelPanel(private val controller: TunnelController) : JPanel(BorderLayou
 
         textArea.document.addDocumentListener(object : DocumentListener {
             override fun insertUpdate(e: DocumentEvent) = drain()
-            override fun removeUpdate(e: DocumentEvent) {}
+            // The host clears the field (select-all + delete) before each request so every
+            // request starts clean. Keep lastConsumed in range so we resume parsing from the
+            // right offset (0 after a full clear) instead of pointing past the end.
+            override fun removeUpdate(e: DocumentEvent) {
+                if (lastConsumed > e.document.length) lastConsumed = e.document.length
+            }
             override fun changedUpdate(e: DocumentEvent) {}
         })
 

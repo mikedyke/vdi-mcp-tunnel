@@ -62,6 +62,17 @@ def _vk(vk, up=False):
 def press_enter():
     _vk(0x0D); _vk(0x0D, True)
 
+VK_CONTROL, VK_A, VK_DELETE, VK_END = 0x11, 0x41, 0x2E, 0x23
+
+def clear_field():
+    """Select-all + delete, so each request is typed into an empty textarea (the bridge
+    tracks a monotonic consume-offset that breaks if text is inserted mid-document, e.g.
+    when the focus-click drops the caret into a prior request's leftover text)."""
+    _vk(VK_CONTROL); _vk(VK_A); _vk(VK_A, True); _vk(VK_CONTROL, True)
+    time.sleep(0.03)
+    _vk(VK_DELETE); _vk(VK_DELETE, True)
+    time.sleep(0.03)
+
 def click(x: int, y: int):
     """Click at (x, y) given in SCREEN-GRAB pixel coords (mss monitors[0] origin, i.e. the
     virtual-desktop top-left). Absolute mouse events are normalised to the whole virtual
