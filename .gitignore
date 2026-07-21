@@ -23,6 +23,10 @@ claude.bat
 # --- VDI-tunnel routing-mode marker (runtime state, not source) ---
 .claude/vdi-tunnel.active
 
+# --- Notes about whatever VDI/project this checkout happens to be pointed at ---
+# These differ per VDI and per target project; they are local scratch, not source.
+docs/vdi-notes/
+
 # --- OS cruft ---
 .DS_Store
 Thumbs.db
