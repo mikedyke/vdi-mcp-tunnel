@@ -46,7 +46,16 @@ Any change to framing, the fountain PRNG (`GOLDEN`, `lcg`, `seed`, high-bits dra
 
 **Bridge** (`TunnelController.kt` state machine: IDLE→RECEIVING→FORWARDING→SENDING/ERROR): reassembles typed REQ lines, forwards the JSON to the IDE's local MCP server (`McpLocalClient`, plain HTTP POST skeleton), LT-encodes the reply and hands QR frames + a heartbeat QR to the Swing panel (`TunnelPanel`), which cycles them at paint ticks. IDE endpoint comes from `-Dvdi.ide.mcp.url=…`.
 
-## Current state (scaffold — not yet end-to-end)
+## VDI-tunnel routing mode
+
+If `.claude/vdi-tunnel.active` exists, VDI-tunnel routing mode is ON: route all
+IntelliJ/VDI project operations (build, run, lint, analyze, project structure, file ops)
+through the `mcp__vdi-tunnel__*` tools, passing the `projectPath` recorded in that file,
+instead of local Bash/Read/Write/Edit (the VDI project is not on this host). The marker is
+managed by the `/vdi-tunnel-on` and `/vdi-tunnel-off` skills. Local tools still apply to
+this tunnel repo itself (`host/`, `bridge-plugin/`, docs).
+
+## Current state
 
 Framing/codec/fountain, ARQ + QR orchestration, capture/decode, proxy, and the bridge tool window are implemented. ArUco markers ship since plugin v0.1.1, and `vision.PANEL_LAYOUT` was measured against the live VDI panel (2026-07-20); heartbeat decode round-trips end-to-end. Known gaps before it runs for real (see README for the full list):
 - `McpLocalClient` speaks streamable HTTP to the IDE's `/stream` endpoint on 64342 (does its own initialize/session-id handshake since the host proxy answers `initialize` locally) — implemented but not yet exercised against the IDE.

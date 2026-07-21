@@ -20,6 +20,9 @@ host/tools_cache.json
 # --- Local helper scripts ---
 claude.bat
 
+# --- VDI-tunnel routing-mode marker (runtime state, not source) ---
+.claude/vdi-tunnel.active
+
 # --- OS cruft ---
 .DS_Store
 Thumbs.db
