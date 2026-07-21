@@ -57,8 +57,14 @@ this tunnel repo itself (`host/`, `bridge-plugin/`, docs).
 
 ## Current state
 
-Framing/codec/fountain, ARQ + QR orchestration, capture/decode, proxy, and the bridge tool window are implemented. ArUco markers ship since plugin v0.1.1, and `vision.PANEL_LAYOUT` was measured against the live VDI panel (2026-07-20); heartbeat decode round-trips end-to-end. Known gaps before it runs for real (see README for the full list):
-- `McpLocalClient` speaks streamable HTTP to the IDE's `/stream` endpoint on 64342 (does its own initialize/session-id handshake since the host proxy answers `initialize` locally) — implemented but not yet exercised against the IDE.
-- Focus-glyph verification before typing (`tunnel._send_request` TODO).
-- Bridge parity unit test against `PROTOCOL.md` vectors.
-- Spec Phase 0: validate over a temporary TCP path before trusting the QR/keyboard channel.
+Framing/codec/fountain, ARQ + QR orchestration, capture/decode, proxy, and the bridge tool
+window are implemented and exercised end-to-end against a live VDI: real MCP tool calls
+(`read_file`, `search_file`, `git_status`, `apply_patch`, …) round-trip through the
+QR/keyboard channel. ArUco markers ship since plugin v0.1.1 (v0.1.7 installed);
+`vision.PANEL_LAYOUT` was measured against the live panel (2026-07-20); `McpLocalClient`'s
+streamable-HTTP handshake to the IDE works; focus-glyph verification before typing is in
+place (`tunnel._focus_textarea` + `vision.is_focused`). Remaining gaps:
+- Bridge parity unit test against `PROTOCOL.md` vectors — the standing one; don't trust a codec change without it.
+- `tools/list` disk cache never staleness-invalidates: the heartbeat's `schema_hash` is always 0, so after an IDE/plugin toolset change `host/tools_cache.json` must be deleted by hand (`proxy.py:_tools`).
+- `execute_terminal_command` never returns while the IDE prompts per command — enable "Brave Mode" in the VDI's IDE or terminal-driven work is blocked.
+- Slow IDE operations can outlast `downlink_timeout_s` (120s). The timeout now names the bridge state (`bridge=FORWARDING` = IDE still busy, `unseen` = panel occluded). **A failed call may still have applied** — read state back before retrying a mutation.

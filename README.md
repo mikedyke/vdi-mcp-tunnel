@@ -44,8 +44,11 @@ release zip through your file-ingress → Install Plugin from Disk. Keep the rep
 internal GitHub Enterprise) — this is an in-house DLP-boundary tool.
 
 **Host (Windows):**
-1. `pip install -r host/requirements.txt`.
-2. `claude mcp add vdi-tunnel -- python -m vdi_tunnel` (run from `host/`).
+1. `setup-venv.bat` — creates `.venv\` and installs `host/requirements.txt`, then verifies the
+   imports that matter (`cv2.aruco` needs opencv-**contrib**; QR decode must be zxing-cpp).
+   `--force` rebuilds from scratch. Or install the requirements yourself with pip.
+2. `claude mcp add vdi-tunnel -- "<repo>\start-vdi-tunnel.bat"` — the launcher sets
+   `PYTHONPATH`, forces UTF-8 stdio and unbuffered output, and prefers `.venv\` if present.
 
 ## What's implemented vs TODO
 Implemented (real logic): framing + zlib codec + CRC (both langs), LT fountain encode/decode
@@ -53,14 +56,16 @@ Implemented (real logic): framing + zlib codec + CRC (both langs), LT fountain e
 downlink orchestration, SendInput driver, mss+ArUco+zxing-cpp capture/decode, MCP stdio proxy
 with tools/list disk cache, bridge tool window + state machine + ZXing QR render.
 
-TODO before end-to-end:
-- **Tune `host/vdi_tunnel/vision.PANEL_LAYOUT`** fractional offsets to the real plugin panel.
-- **Add real ArUco markers** (step 2 above) — placeholders won't be detected.
-- **First real request through the tunnel** — the bridge's streamable-HTTP handshake
-  (initialize/session-id/SSE-framed replies) is implemented but untested against the IDE.
-- **Focus-glyph verification** in `tunnel._send_request` before typing (probe `PANEL_LAYOUT.focus_probe`).
+Working end-to-end against a live VDI: `PANEL_LAYOUT` is tuned to the real panel, real ArUco
+markers ship in the plugin, the bridge's streamable-HTTP handshake is exercised against the
+IDE, focus-glyph verification runs before typing, and real MCP tool calls round-trip.
+
+TODO:
 - **Bridge parity unit test** against `PROTOCOL.md` vectors.
-- Validate over a temporary TCP path first (spec Phase 0), then swap in the QR/keyboard channel.
+- **`tools/list` cache never invalidates** — the heartbeat's `schema_hash` is always 0, so
+  after an IDE/plugin toolset change you must delete `host/tools_cache.json` by hand.
+- **Terminal tools need "Brave Mode"** enabled in the VDI's IDE; without it
+  `execute_terminal_command` blocks on a confirmation dialog nobody is there to click.
 
 ## Layout
 - `host/` — Python proxy + transport (see `host/README.md`)
