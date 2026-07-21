@@ -14,7 +14,8 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-host/tools_cache.json          # runtime cache, not source
+# runtime cache, not source (inline comments are NOT allowed on a pattern line)
+host/tools_cache.json
 
 # --- Local helper scripts ---
 claude.bat
