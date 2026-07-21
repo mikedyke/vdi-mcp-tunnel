@@ -40,9 +40,19 @@ class TunnelController(
             rxHash = Protocol.rollingAck(rxHash, r.chunk)   // ACK surfaced via heartbeat
             expectedTotal = r.total; reqCodec = r.codec
         }
+        // Every REQ carries `total`, so the last chunk is self-announcing: finish here and
+        // treat END as a fallback. Chunks are ACKed (rxHash) and retried, but END is typed
+        // once and never acknowledged -- a dropped keystroke used to truncate it ("E") and
+        // park the bridge in RECEIVING until the host's 120s timeout, with the request
+        // fully received and never forwarded.
+        if (expectedTotal in 1..chunks.size) finishRequest()
     }
 
     private fun finishRequest() {
+        // Idempotent: END may arrive after the auto-finish above, or be retyped by the
+        // host. Without this a second END re-forwards the last request to the IDE, which
+        // would silently re-apply a mutation.
+        if (state != State.RECEIVING) return
         if (expectedTotal <= 0 || chunks.size < expectedTotal) return
         state = State.FORWARDING
         val comp = ByteArray(chunks.values.sumOf { it.size }).also {
