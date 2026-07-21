@@ -70,15 +70,28 @@ class TunnelPanel(private val controller: TunnelController) : JPanel(BorderLayou
 
             val focusTop = height - M - 220   // focus bar row; everything below is reserved
 
-            // main downlink QR (centre-upper). Drawn as large as the panel allows so the
-            // higher-density QR stays capturable — widen the tool window for best throughput.
-            // Bounded by BOTH width and the vertical gap above the focus bar so the QR never
-            // overlaps the focus/heartbeat row (a bar cutting through the QR corrupts it).
-            controller.currentDownlinkImage()?.let {
-                val qrTop = M + 10
-                val s = minOf(width - 2 * M - 20, focusTop - qrTop - 15, 640).coerceAtLeast(64)
-                g2.drawImage(it, (width - s) / 2, qrTop, s, s, null)
-            }
+            // Downlink QR footprint — computed the same whether or not a frame is active, so
+            // the sizing guide below shows where/how big the QR renders while you size the
+            // window. Bounded by BOTH width and the gap above the focus bar so the QR never
+            // overlaps the focus/heartbeat row (a bar through the QR corrupts it).
+            val qrTop = M + 10
+            val qrS = minOf(width - 2 * M - 20, focusTop - qrTop - 15, 640).coerceAtLeast(64)
+            val qrX = (width - qrS) / 2
+
+            // main downlink QR (centre-upper), drawn only while sending a response
+            controller.currentDownlinkImage()?.let { g2.drawImage(it, qrX, qrTop, qrS, qrS, null) }
+
+            // sizing guide: a rectangle just OUTSIDE the QR quiet zone (never touches the code)
+            // + a px/module readout. Green = dense enough for the host to capture; amber = the
+            // window is too small, make it wider/taller until this turns green.
+            val pxPerModule = qrS / 93f          // ~V18 (89 modules) + 2-module quiet zone each side
+            val ok = pxPerModule >= 4f
+            g2.color = if (ok) Color(0, 150, 0) else Color(210, 140, 0)
+            g2.stroke = BasicStroke(2f)
+            g2.drawRect(qrX - 6, qrTop - 6, qrS + 12, qrS + 12)
+            g2.font = g2.font.deriveFont(11f)
+            g2.drawString("QR ${qrS}px  ${"%.1f".format(pxPerModule)} px/module  ${if (ok) "OK" else "widen window"}",
+                          qrX - 6, qrTop - 10)
 
             // heartbeat QR (bottom-right corner region — host PANEL_LAYOUT.heartbeat_roi)
             g2.drawImage(controller.heartbeatImage(160), width - M - 170, height - M - 170, 160, 160, null)
