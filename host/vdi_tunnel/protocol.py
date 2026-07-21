@@ -6,6 +6,8 @@ MAGIC_UP = 0x4344
 VERSION = 1
 TYPE_RESP = 0x01
 TYPE_HEARTBEAT = 0x02
+# mirrors TunnelController.State in the bridge plugin
+STATE_NAMES = {0: "IDLE", 1: "RECEIVING", 2: "FORWARDING", 3: "SENDING", 4: "ERROR"}
 END_SENTINEL = b"END"
 
 # ---- payload codec (MCP json bytes <-> compressed payload) ----

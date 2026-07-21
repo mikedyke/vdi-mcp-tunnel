@@ -98,6 +98,7 @@ class Tunnel:
         gating — the QR is a crisp rendered image, and gating fought the animation."""
         dec = None; meta = None
         seen: set[int] = set()
+        state = None        # last bridge state seen, from the heartbeat QR in the same grab
         deadline = time.time() + self.cfg.downlink_timeout_s
         last_log = time.time()
         while time.time() < deadline:
@@ -105,6 +106,10 @@ class Tunnel:
                 try:
                     f = P.unpack_resp(raw)
                 except Exception:
+                    try:
+                        state = P.unpack_heartbeat(raw)["state"]
+                    except Exception:
+                        pass
                     continue
                 if f["type"] != P.TYPE_RESP or f["gen_id"] != gen_id:
                     continue        # heartbeat QR or a stale generation
@@ -131,7 +136,16 @@ class Tunnel:
                       file=sys.stderr, flush=True)
             time.sleep(0.03)
         need = meta["k"] if meta else "?"
-        raise TunnelError(f"downlink timeout ({len(seen)} symbols seen, need k={need})")
+        where = P.STATE_NAMES.get(state, "unseen" if state is None else str(state))
+        hint = ""
+        if where in ("FORWARDING", "RECEIVING"):
+            # the bridge never got a reply out of the IDE — usually the IDE is blocked on a
+            # confirmation dialog (terminal commands need "Brave Mode" off to prompt)
+            hint = "; bridge still waiting on the IDE - check the VDI for a modal dialog"
+        elif where == "unseen":
+            hint = "; no heartbeat either - panel occluded or not visible"
+        raise TunnelError(
+            f"downlink timeout ({len(seen)} symbols seen, need k={need}, bridge={where}){hint}")
 
     # ---------- public ----------
     def request(self, mcp_json: bytes) -> bytes:
