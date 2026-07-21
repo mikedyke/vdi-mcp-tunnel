@@ -6,7 +6,7 @@ One request/response cycle:
   3. type REQ frames with stop-and-wait ARQ (heartbeat.rx_hash acks each chunk)
   4. read animated RESP QR frames until the LT decoder reconstructs; verify SHA-256
 """
-import sys, time, itertools
+import sys, time, itertools, random
 from . import protocol as P
 from . import vision as V
 from . import winput as W
@@ -18,7 +18,10 @@ class Tunnel:
     def __init__(self, cfg):
         self.cfg = cfg
         self.screen = V.Screen()
-        self._gen = itertools.count(1)
+        # Random start so a fresh session's first gen_id doesn't collide with a stale
+        # response of the same gen_id still animating on the bridge from a prior session
+        # (that mixes two replies' symbols -> SHA mismatch). 16-bit space, wraps in request().
+        self._gen = itertools.count(random.randint(1, 0xFFFF))
 
     # ---------- calibration / heartbeat ----------
     def _calibrate(self):
@@ -58,6 +61,8 @@ class Tunnel:
                 W.type_text(line + "\n", self.cfg.key_interval_ms)
                 if self._await_ack(calib, expected):
                     ack = expected; break
+                print(f"[arq] gen={gen_id} seq={seq} retransmit (attempt {attempt+1})",
+                      file=sys.stderr, flush=True)
                 time.sleep(0.1 * (attempt + 1))
             else:
                 raise TunnelError(f"uplink ARQ failed at chunk {seq}")
@@ -112,7 +117,12 @@ class Tunnel:
                 if dec.add(f["symbol_id"], f["symbol"]):
                     payload = dec.result()
                     if P.sha_tail(payload) != meta["sha"]:
-                        raise TunnelError("SHA mismatch after reconstruction")
+                        # symbols from two same-gen responses got mixed (unlikely now that
+                        # gen is randomised); discard and keep reading fresh frames
+                        print(f"[downlink] gen={gen_id} SHA mismatch, resetting decoder",
+                              file=sys.stderr, flush=True)
+                        dec = None; meta = None; seen.clear()
+                        continue
                     return P.decompress(meta["codec"], payload)
             if dec is not None and time.time() - last_log > 3:
                 last_log = time.time()

@@ -49,7 +49,7 @@ def _key_unicode(ch, up=False):
 def type_text(text: str, interval_ms: int = 12):
     for ch in text:
         if ch == "\n":
-            _vk(0x0D)  # Enter
+            _vk(0x0D); _vk(0x0D, True)  # Enter down+up (up was missing -> key left held)
         else:
             _key_unicode(ch, False); _key_unicode(ch, True)
         time.sleep(interval_ms / 1000.0)
@@ -62,15 +62,19 @@ def _vk(vk, up=False):
 def press_enter():
     _vk(0x0D); _vk(0x0D, True)
 
-VK_CONTROL, VK_A, VK_DELETE, VK_END = 0x11, 0x41, 0x2E, 0x23
+VK_CONTROL, VK_A, VK_BACK = 0x11, 0x41, 0x08
 
 def clear_field():
-    """Select-all + delete, so each request is typed into an empty textarea (the bridge
-    tracks a monotonic consume-offset that breaks if text is inserted mid-document, e.g.
-    when the focus-click drops the caret into a prior request's leftover text)."""
+    """Select-all (Ctrl+A) then Backspace, so each request is typed into an empty textarea
+    (the bridge tracks a monotonic consume-offset that breaks if text is inserted
+    mid-document, e.g. when the focus-click drops the caret into leftover text).
+
+    Backspace, NOT Delete: VK_DELETE (0x2E) sent without KEYEVENTF_EXTENDEDKEY is read as
+    the numpad decimal key, which types ',' on e.g. a German layout — corrupting the first
+    line so the bridge rejects it and the ARQ retransmits (the "doubled message" symptom)."""
     _vk(VK_CONTROL); _vk(VK_A); _vk(VK_A, True); _vk(VK_CONTROL, True)
     time.sleep(0.03)
-    _vk(VK_DELETE); _vk(VK_DELETE, True)
+    _vk(VK_BACK); _vk(VK_BACK, True)
     time.sleep(0.03)
 
 def click(x: int, y: int):
