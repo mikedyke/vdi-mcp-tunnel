@@ -60,8 +60,24 @@ Working end-to-end against a live VDI: `PANEL_LAYOUT` is tuned to the real panel
 markers ship in the plugin, the bridge's streamable-HTTP handshake is exercised against the
 IDE, focus-glyph verification runs before typing, and real MCP tool calls round-trip.
 
+## Tests
+The codec layer is mirrored in Python and Kotlin and must stay byte-compatible, so both
+sides are checked against one generated vector file, `vectors/parity-vectors.txt`:
+
+```
+python -m unittest discover -s host/tests   # host side (stdlib only)
+cd codec-parity && gradle test              # bridge side (no IDE SDK, seconds)
+```
+
+`codec-parity/` is a standalone build that compiles `Protocol.kt` and `Fountain.kt` out of
+the plugin module and nothing else. Regenerate the vectors with
+`python host/tools/gen_parity_vectors.py` — only ever as part of a deliberate protocol
+change, and update `PROTOCOL.md` with it. CI runs all of this in the `parity` job.
+
+Nothing above the codec is tested: capture, typing and the panel geometry are only ever
+exercised against a live VDI.
+
 TODO:
-- **Bridge parity unit test** against `PROTOCOL.md` vectors.
 - **`tools/list` cache never invalidates** — the heartbeat's `schema_hash` is always 0, so
   after an IDE/plugin toolset change you must delete `host/tools_cache.json` by hand.
 - **Terminal tools need "Brave Mode"** enabled in the VDI's IDE; without it
@@ -70,4 +86,6 @@ TODO:
 ## Layout
 - `host/` — Python proxy + transport (see `host/README.md`)
 - `bridge-plugin/` — IntelliJ Kotlin plugin (tool window bridge)
+- `codec-parity/` — SDK-free Gradle build running the bridge half of the parity test
+- `vectors/` — generated cross-language parity vectors (both test suites read this)
 - `PROTOCOL.md` — shared wire format + parity vectors

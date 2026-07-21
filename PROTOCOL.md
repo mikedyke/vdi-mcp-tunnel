@@ -61,7 +61,21 @@ chunks, type `END`. rx_hash update: `rx_hash = crc32(chunk, rx_hash_prev)`.
     seed(s) = lcg(s XOR GOLDEN)
     draw high bits via (state >> 33)
 
-## Cross-language parity vectors (MUST match; add as a bridge unit test)
+## Cross-language parity vectors
+
+`vectors/parity-vectors.txt` is the machine-readable form of this section: frame bytes,
+neighbour sets, encoded symbols, rolling ACKs, sha tails and codec choices, each with its
+inputs. Both implementations are checked against that one file —
+`host/tests/test_parity.py` (`python -m unittest discover -s host/tests`) and
+`codec-parity` (`gradle test`, which compiles `Protocol.kt`/`Fountain.kt` straight out of
+the plugin module and needs no IDE SDK). CI runs both on every push and PR.
+
+Changing anything below is a protocol change: edit both languages, regenerate with
+`python host/tools/gen_parity_vectors.py`, and update this file. A vector diff that
+arrives without a matching protocol change means one side drifted.
+
+The nine fountain vectors, inline for reference:
+
 # Fountain parity vectors (dmax=8) — Kotlin Fountain.neighbors must match:
 #   neighbors(symbolId=10, k=10) = [1, 5, 6]
 #   neighbors(symbolId=11, k=10) = [1, 5, 6, 7]
