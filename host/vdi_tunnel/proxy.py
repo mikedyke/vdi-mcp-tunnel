@@ -4,7 +4,7 @@ MCP stdio framing = newline-delimited JSON-RPC. We forward requests over the Tun
 `tools/list` is cached to disk (keyed by the bridge's schema_hash) so the large tool
 schema only crosses the QR channel once. Swap this hand-rolled loop for the official
 `mcp` SDK later if preferred."""
-import sys, json, os
+import sys, json, os, traceback
 from .tunnel import Tunnel, TunnelError
 
 class Proxy:
@@ -15,15 +15,22 @@ class Proxy:
         self._load_cache()
 
     # ---- disk cache for tools/list ----
+    def _cache_path(self):
+        # absolute + stable regardless of the cwd Claude Code launches us from
+        p = self.cfg.tools_cache_path
+        if not os.path.isabs(p):
+            p = os.path.join(os.path.dirname(os.path.dirname(__file__)), p)
+        return p
+
     def _load_cache(self):
         try:
-            with open(self.cfg.tools_cache_path) as f:
+            with open(self._cache_path()) as f:
                 self._tools_cache = json.load(f)
         except Exception:
             self._tools_cache = None
 
     def _save_cache(self, tools, schema_hash):
-        with open(self.cfg.tools_cache_path, "w") as f:
+        with open(self._cache_path(), "w") as f:
             json.dump({"schema_hash": schema_hash, "tools": tools}, f)
 
     def _schema_current(self):
@@ -40,7 +47,13 @@ class Proxy:
                 msg = json.loads(line)
             except Exception:
                 continue
-            self._handle(msg)
+            try:
+                self._handle(msg)
+            except Exception as e:
+                # never let one bad request kill the server; report it if it had an id
+                traceback.print_exc(file=sys.stderr)
+                if msg.get("id") is not None:
+                    self._reply(msg.get("id"), error={"code": -32000, "message": str(e)})
 
     def _reply(self, id_, result=None, error=None):
         out = {"jsonrpc": "2.0", "id": id_}
@@ -62,18 +75,24 @@ class Proxy:
         elif method == "notifications/initialized":
             pass  # notification, no reply
         elif method == "tools/list":
-            self._reply(id_, {"tools": self._tools(cache_ok=True)})
+            self._reply(id_, {"tools": self._tools()})
         elif method == "tools/call":
             self._forward(msg)
         else:
             # forward anything else verbatim
             self._forward(msg)
 
-    def _tools(self, cache_ok=True):
-        cur = self._schema_current()
-        if cache_ok and self._tools_cache and self._tools_cache.get("schema_hash") == cur:
+    def _tools(self):
+        # Serve the cache immediately if present — fast startup, and no screen access
+        # (the bridge's schema_hash is currently always 0, so the cache never staleness-
+        # invalidates; delete host/tools_cache.json to force a fresh pull).
+        if self._tools_cache and self._tools_cache.get("tools"):
             return self._tools_cache["tools"]
-        # pull fresh over the tunnel (one big transfer), then cache
+        # No cache yet: pull once over the tunnel (large transfer, drives the screen).
+        try:
+            cur = self._schema_current()
+        except Exception:
+            cur = None
         req = json.dumps({"jsonrpc": "2.0", "id": "tl", "method": "tools/list"}).encode()
         resp = json.loads(self.tunnel.request(req))
         tools = resp.get("result", {}).get("tools", [])
