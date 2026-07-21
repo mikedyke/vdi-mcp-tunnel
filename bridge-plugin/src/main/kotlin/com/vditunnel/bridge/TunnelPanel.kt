@@ -68,11 +68,16 @@ class TunnelPanel(private val controller: TunnelController) : JPanel(BorderLayou
             drawMarker(g2, 2, width - M, height - M)
             drawMarker(g2, 3, 0, height - M)
 
+            val focusTop = height - M - 220   // focus bar row; everything below is reserved
+
             // main downlink QR (centre-upper). Drawn as large as the panel allows so the
             // higher-density QR stays capturable — widen the tool window for best throughput.
+            // Bounded by BOTH width and the vertical gap above the focus bar so the QR never
+            // overlaps the focus/heartbeat row (a bar cutting through the QR corrupts it).
             controller.currentDownlinkImage()?.let {
-                val s = minOf(width - 2 * M - 20, 640)
-                g2.drawImage(it, (width - s) / 2, M + 10, s, s, null)
+                val qrTop = M + 10
+                val s = minOf(width - 2 * M - 20, focusTop - qrTop - 15, 640).coerceAtLeast(64)
+                g2.drawImage(it, (width - s) / 2, qrTop, s, s, null)
             }
 
             // heartbeat QR (bottom-right corner region — host PANEL_LAYOUT.heartbeat_roi)
@@ -81,7 +86,7 @@ class TunnelPanel(private val controller: TunnelController) : JPanel(BorderLayou
             // focus indicator: border colour flips when the textarea is focused (host verifies before typing)
             g2.color = if (textArea.hasFocus()) Color(0, 180, 0) else Color(200, 0, 0)
             g2.stroke = BasicStroke(6f)
-            g2.drawRect(M, height - M - 220, width - 2 * M, 30)
+            g2.drawRect(M, focusTop, width - 2 * M, 30)
         }
 
         private fun drawMarker(g2: Graphics2D, id: Int, x: Int, y: Int) {
