@@ -28,6 +28,12 @@ class TunnelController(
     private val downFrames = AtomicReference<List<BufferedImage>>(emptyList())
     @Volatile private var downIdx = 0
 
+    /** Forwarding happens here, never on the caller's thread -- see [finishRequest].
+     *  Single-threaded on purpose: one request is in flight at a time. */
+    private val worker = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "vdi-tunnel-forward").apply { isDaemon = true }
+    }
+
     // ---- uplink: called per completed textarea line ----
     fun acceptLine(line: String) {
         if (line.trim() == "END") { finishRequest(); return }
@@ -55,12 +61,24 @@ class TunnelController(
         if (state != State.RECEIVING) return
         if (expectedTotal <= 0 || chunks.size < expectedTotal) return
         state = State.FORWARDING
+        // Snapshot the reassembled request on the caller's thread: `chunks` is only ever
+        // touched from there, so the worker never sees it and a request arriving mid-flight
+        // can reset it safely.
         val comp = ByteArray(chunks.values.sumOf { it.size }).also {
             var o = 0; for (s in 0 until expectedTotal) { val c = chunks[s]!!; c.copyInto(it, o); o += c.size }
         }
-        val mcpJson = String(inflateIfNeeded(reqCodec, comp), Charsets.UTF_8)
-        val reply = try { ide.call(mcpJson) } catch (e: Exception) { errorReply(e.message) }
-        sendResponse(reply.toByteArray(Charsets.UTF_8))
+        val codec = reqCodec
+        // acceptLine runs on the Swing EDT (panel DocumentListener), and ide.call blocks for
+        // as long as the IDE takes. Doing that inline froze the entire IDE for the duration
+        // of every tool call, and -- once the last chunk started the forward instead of END
+        // -- also stalled the repaint carrying rxHash back to the host, so the 1.5s ACK
+        // window for the final chunk could never be met.
+        worker.execute {
+            val reply = try {
+                ide.call(String(inflateIfNeeded(codec, comp), Charsets.UTF_8))
+            } catch (e: Exception) { errorReply(e.message) }
+            sendResponse(reply.toByteArray(Charsets.UTF_8))
+        }
     }
 
     private fun inflateIfNeeded(codec: Int, data: ByteArray): ByteArray {
