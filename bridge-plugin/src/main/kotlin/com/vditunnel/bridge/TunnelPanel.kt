@@ -1,6 +1,9 @@
 package com.vditunnel.bridge
 
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.wm.WindowManager
 import java.awt.*
+import java.awt.event.HierarchyEvent
 import java.awt.image.BufferedImage
 import javax.imageio.ImageIO
 import javax.swing.*
@@ -10,7 +13,10 @@ import javax.swing.event.DocumentListener
 /** The tool-window UI: plain textarea (uplink) + canvas (downlink QR, heartbeat, fiducials, focus glyph).
  *  Panel is ONE calibrated unit — the host locates the 4 corner ArUco markers and derives every
  *  other point (QR ROI, textarea click-point) as a fixed offset. Keep this layout stable. */
-class TunnelPanel(private val controller: TunnelController) : JPanel(BorderLayout()) {
+class TunnelPanel(
+    private val controller: TunnelController,
+    private val project: Project? = null,
+) : JPanel(BorderLayout()) {
 
     private val textArea = JTextArea(6, 40).apply {
         lineWrap = false
@@ -39,6 +45,32 @@ class TunnelPanel(private val controller: TunnelController) : JPanel(BorderLayou
         // downlink animation + heartbeat repaint. Each paint advances one RESP symbol;
         // 6 fps roughly halves large-reply transfer time vs 3 (host capture keeps up).
         Timer(1000 / 6) { canvas.repaint() }.start()   // downlink fps
+
+        // Undocked, the panel drops behind the IDE frame as soon as anything raises the IDE
+        // -- running a terminal command, opening a dialog. The host then cannot see the four
+        // fiducials and fails with "panel not found", or worse, types into whatever is in
+        // front. Pin the panel's own window on top so it stays capturable and clickable.
+        // Escape hatch: -Dvdi.tunnel.always.on.top=false
+        addHierarchyListener { e ->
+            val moved = HierarchyEvent.SHOWING_CHANGED or HierarchyEvent.PARENT_CHANGED
+            if (e.changeFlags and moved.toLong() != 0L) applyAlwaysOnTop()
+        }
+    }
+
+    /** Only ever applied to a separate tool-window window. When the panel is docked the
+     *  ancestor IS the main IDE frame, and pinning that would hold the whole IDE above every
+     *  other application on the VDI desktop. */
+    private fun applyAlwaysOnTop() {
+        if (System.getProperty("vdi.tunnel.always.on.top", "true") != "true") return
+        val window = SwingUtilities.getWindowAncestor(this) ?: return
+        if (window === project?.let { WindowManager.getInstance().getFrame(it) }) return
+        if (!Toolkit.getDefaultToolkit().isAlwaysOnTopSupported) return
+        try {
+            if (window.isAlwaysOnTopSupported && !window.isAlwaysOnTop) window.isAlwaysOnTop = true
+        } catch (_: Exception) {
+            // SecurityException / unsupported window kind: leave it, the panel still works
+            // docked or if the user keeps it visible manually.
+        }
     }
 
     /** Turn newline-terminated content into complete lines fed to the controller. */

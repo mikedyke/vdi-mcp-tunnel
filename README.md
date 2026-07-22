@@ -31,7 +31,12 @@ the channel. Swap in a shared RaptorQ pair later if you confirm one; the frame l
    Release, or from the workflow run's artifacts. To build locally instead:
    `cd bridge-plugin && gradle buildPlugin` → `build/distributions/vdi-tunnel-bridge-*.zip`.
 5. In the VDI IDE: Settings > Plugins > gear ⚙ > *Install Plugin from Disk…* > pick the zip > restart.
-6. Open the **VDI Tunnel** tool window. The IDE endpoint defaults to
+6. Open the **VDI Tunnel** tool window; undock it (Float/Window) and size it wide (~560px+)
+   until the sizing guide reads green. Undocked, the plugin pins its own window always-on-top
+   since v0.1.10 — otherwise running a terminal command raises the IDE over it and the host
+   loses the fiducials ("panel not found"). Disable with `-Dvdi.tunnel.always.on.top=false`.
+   Docked, nothing is pinned (the ancestor window there is the IDE frame itself).
+   The IDE endpoint defaults to
    `http://127.0.0.1:64342/stream` (streamable HTTP); override via `-Dvdi.ide.mcp.url=…`
    in Help > Edit Custom VM Options if yours differs. Enable the MCP Server in
    Settings > Tools with Brave Mode ON.
