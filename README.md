@@ -80,8 +80,17 @@ exercised against a live VDI.
 TODO:
 - **`tools/list` cache never invalidates** — the heartbeat's `schema_hash` is always 0, so
   after an IDE/plugin toolset change you must delete `host/tools_cache.json` by hand.
-- **Terminal tools need "Brave Mode"** enabled in the VDI's IDE; without it
-  `execute_terminal_command` blocks on a confirmation dialog nobody is there to click.
+
+## Using the terminal tool
+`execute_terminal_command` needs **Brave Mode ON** in the VDI's IDE, otherwise it blocks on
+a confirmation dialog nobody is there to click. With it on, call it in process mode
+(`executeInShell: false`, the default) and wrap shell builtins as `cmd /c …` — process mode
+CreateProcesses the program directly, so a bare `echo` fails with "Cannot run program".
+
+Do **not** pass `executeInShell: true`. It makes the IDE open its integrated terminal
+widget, which steals focus and lags the UI while the host is typing; that dropped enough
+keystrokes to truncate the `END` sentinel to `E` and park the bridge in `RECEIVING` until
+the host timed out. A keystroke channel cannot survive a focus-stealing tool window.
 
 ## Layout
 - `host/` — Python proxy + transport (see `host/README.md`)
