@@ -7,7 +7,8 @@
         relaying to the IDE's built-in MCP server on localhost. In-house tool — not for Marketplace.
     ]]></description>
 
-    <!-- Pin to 2025.2+ ; widen/narrow to match your VDI IDE. 262.* covers 2026.2. -->
+    <!-- 252 = 2025.2, 261 = 2026.1, 262 = 2026.2. Built against 2026.1 (gradle.properties);
+         the range stays wide because the plugin uses only long-stable platform APIs. -->
     <idea-version since-build="252" until-build="262.*"/>
 
     <depends>com.intellij.modules.platform</depends>
