@@ -58,9 +58,18 @@ The vectors are generated from the Python implementation (`python host/tools/gen
 If `.claude/vdi-tunnel.active` exists, VDI-tunnel routing mode is ON: route all
 IntelliJ/VDI project operations (build, run, lint, analyze, project structure, file ops)
 through the `mcp__vdi-tunnel__*` tools, passing the `projectPath` recorded in that file,
-instead of local Bash/Read/Write/Edit (the VDI project is not on this host). The marker is
-managed by the `/vdi-tunnel-on` and `/vdi-tunnel-off` skills. Local tools still apply to
-this tunnel repo itself (`host/`, `bridge-plugin/`, docs).
+instead of local Bash/Read/Write/Edit (the VDI project is not on this host). The marker also
+records the `computerName` of the remote VDI machine it was captured for — different VDI
+sessions are different machines with different projects open, so `/vdi-tunnel-on` detects
+the live `hostname` and looks up (or asks for, then remembers) that machine's project path in
+`.claude/vdi-tunnel-projects.json` rather than assuming a single global path. The marker
+itself is managed by the `/vdi-tunnel-on` and `/vdi-tunnel-off` skills. Local tools still
+apply to this tunnel repo itself (`host/`, `bridge-plugin/`, docs).
+
+`/vdi-tunnel-on` also builds a per-machine knowledge-base doc the first time it meets a new
+computerName: a fork subagent explores the VDI (drives, network shares, installed software,
+project structure) and writes `docs/vdi-notes/machines/<computerName>.md`. Like the rest of
+`docs/vdi-notes/`, this is gitignored — machine details are local-only, never committed.
 
 ## Current state
 
@@ -72,5 +81,5 @@ QR/keyboard channel. ArUco markers ship since plugin v0.1.1 (v0.1.7 installed);
 streamable-HTTP handshake to the IDE works; focus-glyph verification before typing is in
 place (`tunnel._focus_textarea` + `vision.is_focused`). Remaining gaps:
 - `tools/list` disk cache never staleness-invalidates: the heartbeat's `schema_hash` is always 0, so after an IDE/plugin toolset change `host/tools_cache.json` must be deleted by hand (`proxy.py:_tools`).
-- `execute_terminal_command` works (Brave Mode is ON in the VDI; confirmed 2026-07-22, `cmd /c echo` returned exit 0 through the tunnel). Two rules: pass `executeInShell: false` (the default) and wrap builtins as `cmd /c …`, because process mode CreateProcesses the program directly and `echo` is not an exe. **Never pass `executeInShell: true`** — it makes the IDE open its integrated terminal widget, which steals focus and lags the UI mid-typing; on 2026-07-21 that truncated the `END` sentinel to `E` and wedged the channel.
+- `execute_terminal_command` works (Brave Mode is ON in the VDI; confirmed 2026-07-22, `cmd /c echo` returned exit 0 through the tunnel). Pass `executeInShell: false` (the default), because process mode CreateProcesses the program directly. **Never pass `executeInShell: true`** — it makes the IDE open its integrated terminal widget, which steals focus and lags the UI mid-typing; on 2026-07-21 that truncated the `END` sentinel to `E` and wedged the channel. **Never invoke `cmd.exe` (including `cmd /c` wrapping)** — on at least one client VDI, `cmd.exe` execution is against org policy even though nothing technically blocks it (Brave Mode suppresses the IDE's own confirmation prompt, so a policy violation wouldn't surface as an error); use `powershell -NoProfile -Command "…"` as the process instead, which covers builtins (`Get-ChildItem` for `dir`, `Get-Content` for `type`, etc.) without a `cmd.exe` child process. Note: a bare trailing backslash at the end of a path argument breaks command-line parsing regardless of shell (`dir C:\` fails, `dir C:` works) — a generic Windows quoted-arg gotcha, not `cmd`-specific.
 - Slow IDE operations can outlast `downlink_timeout_s` (120s). The timeout now names the bridge state (`bridge=FORWARDING` = IDE still busy, `unseen` = panel occluded). **A failed call may still have applied** — read state back before retrying a mutation.

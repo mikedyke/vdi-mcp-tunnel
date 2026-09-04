@@ -23,6 +23,9 @@ claude.bat
 # --- VDI-tunnel routing-mode marker (runtime state, not source) ---
 .claude/vdi-tunnel.active
 
+# --- Per-machine project path lookup (computername -> projectPath), local to this host ---
+.claude/vdi-tunnel-projects.json
+
 # --- Notes about whatever VDI/project this checkout happens to be pointed at ---
 # These differ per VDI and per target project; they are local scratch, not source.
 docs/vdi-notes/
