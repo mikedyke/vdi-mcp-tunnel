@@ -50,8 +50,11 @@ Edit cannot reach it — the tunnel is the only path.
 5. **Build this machine's knowledge-base doc if it doesn't exist yet.** Check whether
    `docs/vdi-notes/machines/<computerName>.md` exists. `docs/vdi-notes/` is entirely
    gitignored already — this knowledge is local-only, never commit anything under it. If the
-   file is missing, spawn a subagent (Agent tool, `subagent_type: "fork"`) to explore this
-   machine read-only over `mcp__vdi-tunnel__*` and write that doc. Brief the subagent to:
+   file is missing, explore this machine read-only over `mcp__vdi-tunnel__*` **inline (in the
+   main session — NEVER via a subagent/fork; see CLAUDE.md's no-subagent-for-the-tunnel rule:
+   a tunnel call drives the VDI and, on the legacy backend, hijacks the user's real mouse/
+   keyboard, so a background subagent grabs their input with no warning)** and write the doc
+   yourself. Cover:
    - **Never invoke `cmd.exe`** (no `cmd /c` anything, including for `net use`) — use
      `powershell -NoProfile -Command "…"` for every terminal call.
    - Stay read-only: drives (`Get-PSDrive`/`Get-Volume` + `net use` via PowerShell) and their
@@ -63,8 +66,9 @@ Edit cannot reach it — the tunnel is the only path.
      found" response — just record it as observed, per the routing-mode ground rules.
    - Follow the structure/tone of `docs/vdi-notes/cusb19.md` (a per-project precedent doc in
      this repo) adapted to per-machine content — factual and concise, not padded.
-   - This takes a few minutes of real tunnel round trips; mention to the user that it's
-     running in the background rather than blocking routing-mode confirmation on it.
+   - This takes a few minutes of real tunnel round trips; tell the user it's happening so they
+     don't fight the panel for input mid-call (esp. on the legacy backend, which drives the
+     real mouse/keyboard). Confirm routing-mode is on first, then do the exploration.
    If the doc already exists, skip this step silently — don't re-explore an already-known machine.
 
 6. **Adopt the routing rule for the rest of this session** (and re-adopt it whenever the

@@ -46,8 +46,10 @@ The vectors are generated from the Python implementation (`python host/tools/gen
 
 **Host request/response cycle** (`tunnel.py` orchestrates, one cycle per MCP message):
 1. `vision.find_panel` detects 4 ArUco corner markers (DICT_4X4_50, ids 0–3 at TL,TR,BR,BL) bounding the plugin panel → homography. All click points and QR ROIs are fractional offsets inside the rectified panel, defined once in `vision.PANEL_LAYOUT`.
-2. Uplink: request is zlib-compressed, chunked, each chunk typed as a base64 line (`winput.py` SendInput) with stop-and-wait ARQ — the bridge acks by exposing a rolling CRC32 (`rx_hash`) in its heartbeat QR; `END` line closes the message.
-3. Downlink: bridge LT-encodes the reply into a cycling set of QR frames; host waits for the ROI to visually settle (`vision.stable`), decodes QRs via zxing-cpp, feeds symbols to the peeling `fountain.Decoder` until reconstruction, then verifies SHA tail.
+2. Uplink: request is zlib-compressed, chunked, each chunk typed as a base64 line with stop-and-wait ARQ — the bridge acks by exposing a rolling CRC32 (`rx_hash`) in its heartbeat QR; `END` line closes the message.
+3. Downlink: bridge LT-encodes the reply into a cycling set of QR frames; host grabs repeatedly, decodes QRs via zxing-cpp, feeds symbols to the peeling `fountain.Decoder` until reconstruction, then verifies SHA tail.
+
+**Capture + input backend** (`winio.py`, chosen by `config.background_mode`, default on): the grab and keystroke/click layer is abstracted behind one interface (`grab`/`focus_click`/`type_text`/`clear_field`) with two implementations. `BgBackend` (default) captures via `PrintWindow(PW_RENDERFULLCONTENT)` of the Citrix session window — read even when the panel is **occluded or the window is in the background** — and drives input by posting messages to the ICA display child (`CtxICADisp`): `SendMessage(WM_CHAR)` for text (layout-independent, like the old UNICODE path; lParam repeat-count must be ≥1 or the ICA client drops the char), raw `WM_KEYDOWN/UP` for Enter and Ctrl+A/Backspace, posted mouse clicks to focus — all **without foregrounding the window or moving the physical cursor**. `LegacyBackend` is the original `mss` full-desktop grab + `winput.py` SendInput (global; needs the panel visible and the window active). The window is auto-located as any visible top-level with a `CtxICADisp` descendant; set `background_mode=False` to fall back to legacy.
 
 **Host MCP layer** (`proxy.py`): hand-rolled newline-delimited JSON-RPC stdio loop. `initialize` is answered locally; `tools/list` is cached to disk (`tools_cache.json`) keyed by the bridge heartbeat's `schema_hash` so the large schema crosses the QR channel only once; everything else forwards through the tunnel verbatim.
 
@@ -66,18 +68,35 @@ the live `hostname` and looks up (or asks for, then remembers) that machine's pr
 itself is managed by the `/vdi-tunnel-on` and `/vdi-tunnel-off` skills. Local tools still
 apply to this tunnel repo itself (`host/`, `bridge-plugin/`, docs).
 
+**Never delegate a `mcp__vdi-tunnel__*` call (or any tunnel-driving script) to a subagent or
+fork — run every tunnel operation inline in the main session.** A tunnel call physically drives
+the VDI, and on the legacy backend `SendInput`/`mss` path it hijacks the host's real mouse and
+keyboard *globally* (cursor jumps to the Citrix window; if focus isn't there, typed keystrokes
+land in whatever window is focused — e.g. the user's own prompt). A background subagent doing
+that grabs the user's input with no warning and hides what it's doing (this happened 2026-09-04).
+So: explore a machine or project over the tunnel **inline**; a subagent may only write up facts
+you already gathered inline, and must not itself call any tunnel tool.
+
 `/vdi-tunnel-on` also builds a per-machine knowledge-base doc the first time it meets a new
-computerName: a fork subagent explores the VDI (drives, network shares, installed software,
-project structure) and writes `docs/vdi-notes/machines/<computerName>.md`. Like the rest of
+computerName: explore the VDI **inline** (drives, network shares, installed software, project
+structure) and write `docs/vdi-notes/machines/<computerName>.md`. Like the rest of
 `docs/vdi-notes/`, this is gitignored — machine details are local-only, never committed.
 
 Keep that doc current after the initial build, too: whenever using the tunnel on a machine
 surfaces a new machine-level fact not already recorded there — a drive/share, installed
 software, a tool-availability quirk (e.g. a tool the cached schema lists but the live IDE
 doesn't expose), an org-policy constraint (e.g. the cmd.exe restriction), a JDK/IDE location,
-etc. — spawn a fork subagent to update `docs/vdi-notes/machines/<computerName>.md` with it.
-Don't let such facts live only in the conversation; the doc is the durable record. Routine
-project-code findings still belong in the per-project `docs/vdi-notes/<project>.md` instead.
+etc. — update `docs/vdi-notes/machines/<computerName>.md` with it. Don't let such facts live
+only in the conversation; the doc is the durable record. Routine project-code findings still
+belong in the per-project `docs/vdi-notes/<project>.md` instead.
+
+The exploration and the write-up are done **inline** (see the no-subagent rule above — anything
+that drives the tunnel must be). If you delegate only the *prose write-up of facts already
+gathered inline* to a subagent, use a fresh `general-purpose` one (NOT a `fork`: a fork inherits
+this conversation and gets role-confused — on 2026-09-04 one narrated editing CLAUDE.md and
+reported success without touching the doc), it must not call any tunnel tool, don't run it
+concurrently with your own edits to the same doc, and verify the file actually changed
+(mtime/grep) rather than trusting its report.
 
 ## Current state
 
@@ -87,7 +106,13 @@ window are implemented and exercised end-to-end against a live VDI: real MCP too
 QR/keyboard channel. ArUco markers ship since plugin v0.1.1 (v0.1.7 installed);
 `vision.PANEL_LAYOUT` was measured against the live panel (2026-07-20); `McpLocalClient`'s
 streamable-HTTP handshake to the IDE works; focus-glyph verification before typing is in
-place (`tunnel._focus_textarea` + `vision.is_focused`). Remaining gaps:
+place (`tunnel._focus_textarea` + `vision.is_focused`). Since 2026-09-04 the default backend
+(`winio.BgBackend`, see Architecture) captures via PrintWindow and drives input by posting
+messages to the ICA child, so a call **no longer needs the bridge panel kept visible/on top
+and no longer takes over the physical keyboard/mouse** — it runs with the Citrix window
+occluded and in the background (validated end-to-end: `get_project_modules` and a 95 KB
+`tools/list`). The window must not be **minimised** (PrintWindow yields nothing then).
+Remaining gaps:
 - `tools/list` disk cache never staleness-invalidates: the heartbeat's `schema_hash` is always 0, so after an IDE/plugin toolset change `host/tools_cache.json` must be deleted by hand (`proxy.py:_tools`).
 - `execute_terminal_command` works (Brave Mode is ON in the VDI; confirmed 2026-07-22, `cmd /c echo` returned exit 0 through the tunnel). Pass `executeInShell: false` (the default), because process mode CreateProcesses the program directly. **Never pass `executeInShell: true`** — it makes the IDE open its integrated terminal widget, which steals focus and lags the UI mid-typing; on 2026-07-21 that truncated the `END` sentinel to `E` and wedged the channel. **Never invoke `cmd.exe` (including `cmd /c` wrapping)** — on at least one client VDI, `cmd.exe` execution is against org policy even though nothing technically blocks it (Brave Mode suppresses the IDE's own confirmation prompt, so a policy violation wouldn't surface as an error); use `powershell -NoProfile -Command "…"` as the process instead, which covers builtins (`Get-ChildItem` for `dir`, `Get-Content` for `type`, etc.) without a `cmd.exe` child process. Note: a bare trailing backslash at the end of a path argument breaks command-line parsing regardless of shell (`dir C:\` fails, `dir C:` works) — a generic Windows quoted-arg gotcha, not `cmd`-specific.
-- Slow IDE operations can outlast `downlink_timeout_s` (120s). The timeout now names the bridge state (`bridge=FORWARDING` = IDE still busy, `unseen` = panel occluded). **A failed call may still have applied** — read state back before retrying a mutation.
+- Slow IDE operations can outlast `downlink_timeout_s` (120s). The timeout names the bridge state (`bridge=FORWARDING` = IDE still busy, `unseen` = no heartbeat decoded). With the PrintWindow backend `unseen` no longer means "panel occluded" (occlusion is fine now) — it means the window is minimised, the panel scrolled out of the tool window, or the session disconnected. **A failed call may still have applied** — read state back before retrying a mutation.
