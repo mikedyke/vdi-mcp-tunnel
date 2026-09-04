@@ -71,6 +71,14 @@ computerName: a fork subagent explores the VDI (drives, network shares, installe
 project structure) and writes `docs/vdi-notes/machines/<computerName>.md`. Like the rest of
 `docs/vdi-notes/`, this is gitignored — machine details are local-only, never committed.
 
+Keep that doc current after the initial build, too: whenever using the tunnel on a machine
+surfaces a new machine-level fact not already recorded there — a drive/share, installed
+software, a tool-availability quirk (e.g. a tool the cached schema lists but the live IDE
+doesn't expose), an org-policy constraint (e.g. the cmd.exe restriction), a JDK/IDE location,
+etc. — spawn a fork subagent to update `docs/vdi-notes/machines/<computerName>.md` with it.
+Don't let such facts live only in the conversation; the doc is the durable record. Routine
+project-code findings still belong in the per-project `docs/vdi-notes/<project>.md` instead.
+
 ## Current state
 
 Framing/codec/fountain, ARQ + QR orchestration, capture/decode, proxy, and the bridge tool
