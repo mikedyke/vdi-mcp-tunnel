@@ -20,6 +20,13 @@ class Config:
     arq_max_retries: int = 5
     key_interval_ms: int = 12       # inter-key delay; tune to session lag
     ack_timeout_ms: int = 1500
+    # --- Capture / input backend ---
+    background_mode: bool = True     # True: PrintWindow capture + posted messages to the ICA
+                                     #   display child (reads through occlusion, never steals
+                                     #   focus/cursor). False: legacy mss grab + SendInput.
+    ica_window_title_substr: str = ""  # optional filter to pick the right Citrix session window
+                                     #   when several are open (matched against the title, case-
+                                     #   insensitive). Empty = first window with a CtxICADisp child.
     # --- MCP proxy ---
     tools_cache_path: str = "tools_cache.json"
 

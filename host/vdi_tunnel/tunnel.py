@@ -9,7 +9,7 @@ One request/response cycle:
 import sys, time, itertools, random
 from . import protocol as P
 from . import vision as V
-from . import winput as W
+from . import winio
 from .fountain import Decoder
 
 class TunnelError(Exception): ...
@@ -17,7 +17,7 @@ class TunnelError(Exception): ...
 class Tunnel:
     def __init__(self, cfg):
         self.cfg = cfg
-        self.screen = V.Screen()
+        self.io = winio.make_backend(cfg)
         # Random start so a fresh session's first gen_id doesn't collide with a stale
         # response of the same gen_id still animating on the bridge from a prior session
         # (that mixes two replies' symbols -> SHA mismatch). 16-bit space, wraps in request().
@@ -26,14 +26,14 @@ class Tunnel:
     # ---------- calibration / heartbeat ----------
     def _calibrate(self):
         for _ in range(20):
-            calib = V.find_panel(self.screen.grab())
+            calib = V.find_panel(self.io.grab())
             if calib:
                 return calib
             time.sleep(0.1)
         raise TunnelError("panel not found (bridge tool window visible? fiducials in view?)")
 
     def _heartbeat(self, calib):
-        for raw in V.read_heartbeat(self.screen.grab(), calib):
+        for raw in V.read_heartbeat(self.io.grab(), calib):
             try:
                 return P.unpack_heartbeat(raw)
             except Exception:
@@ -52,13 +52,13 @@ class Tunnel:
         chunks = [comp[i:i+fp] for i in range(0, len(comp), fp)] or [b""]
         total = len(chunks)
         self._focus_textarea(calib)
-        W.clear_field()     # start each request from an empty textarea (multi-command safe)
+        self.io.clear_field()  # start each request from an empty textarea (multi-command safe)
         ack = 0
         for seq, chunk in enumerate(chunks):
             line = P.req_to_line(P.pack_req(gen_id, seq, total, codec, chunk))
             expected = P.rolling_ack(ack, chunk)
             for attempt in range(self.cfg.arq_max_retries):
-                W.type_text(line + "\n", self.cfg.key_interval_ms)
+                self.io.type_text(line + "\n")
                 if self._await_ack(calib, expected):
                     ack = expected; break
                 print(f"[arq] gen={gen_id} seq={seq} retransmit (attempt {attempt+1})",
@@ -66,16 +66,16 @@ class Tunnel:
                 time.sleep(0.1 * (attempt + 1))
             else:
                 raise TunnelError(f"uplink ARQ failed at chunk {seq}")
-        W.type_text("END\n", self.cfg.key_interval_ms)
+        self.io.type_text("END\n")
 
     def _focus_textarea(self, calib):
         """Click the textarea and confirm the panel's focus bar goes green before typing.
         Retries the click a few times; raises if the panel never reports focus so we never
         type keystrokes into the void (or the wrong window)."""
         for attempt in range(5):
-            W.click(*calib.textarea_point())
+            self.io.focus_click(*calib.textarea_point())
             time.sleep(0.15)
-            focused = V.is_focused(self.screen.grab(), calib)
+            focused = V.is_focused(self.io.grab(), calib)
             if focused:
                 return
             time.sleep(0.1 * (attempt + 1))
@@ -102,7 +102,7 @@ class Tunnel:
         deadline = time.time() + self.cfg.downlink_timeout_s
         last_log = time.time()
         while time.time() < deadline:
-            for raw in V.read_all(self.screen.grab(), calib):
+            for raw in V.read_all(self.io.grab(), calib):
                 try:
                     f = P.unpack_resp(raw)
                 except Exception:
