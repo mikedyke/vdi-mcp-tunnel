@@ -25,6 +25,10 @@ class TunnelPanel(
     }
     private val canvas = Canvas()
     private var lastConsumed = 0   // chars of textArea already turned into lines
+    private var lastState = controller.state
+    private var reclaimUntil = 0L  // see reclaimFocus()
+    private val reclaimEnabled = System.getProperty("vdi.tunnel.reclaim.focus", "true") == "true"
+    private val RECLAIM_MS = 4000L
 
     init {
         preferredSize = Dimension(560, 900)
@@ -44,7 +48,7 @@ class TunnelPanel(
 
         // downlink animation + heartbeat repaint. Each paint advances one RESP symbol;
         // 6 fps roughly halves large-reply transfer time vs 3 (host capture keeps up).
-        Timer(1000 / 6) { canvas.repaint() }.start()   // downlink fps
+        Timer(1000 / 6) { reclaimFocus(); canvas.repaint() }.start()   // downlink fps
 
         // Undocked, the panel drops behind the IDE frame as soon as anything raises the IDE
         // -- running a terminal command, opening a dialog. The host then cannot see the four
@@ -55,6 +59,25 @@ class TunnelPanel(
             val moved = HierarchyEvent.SHOWING_CHANGED or HierarchyEvent.PARENT_CHANGED
             if (e.changeFlags and moved.toLong() != 0L) applyAlwaysOnTop()
         }
+    }
+
+    /** Takes keyboard focus back for the textarea for a few seconds after each reply is ready.
+     *  The host can only get keystrokes into the textarea if it owns focus inside the VDI, and
+     *  IDE tools (e.g. execute_terminal_command) move focus elsewhere while they run. Without
+     *  this the host has to click the textarea before every request, and the Citrix client
+     *  answers that click by yanking the host's real mouse cursor. requestFocusInWindow never
+     *  activates a window: if the user is in another application in the VDI it is a no-op and
+     *  the host falls back to clicking. It does take focus from the IDE's editor, so keep the
+     *  window short. Escape hatch: -Dvdi.tunnel.reclaim.focus=false */
+    private fun reclaimFocus() {
+        val state = controller.state
+        if (state != lastState) {
+            if (state == TunnelController.State.SENDING)
+                reclaimUntil = System.currentTimeMillis() + RECLAIM_MS
+            lastState = state
+        }
+        if (System.currentTimeMillis() < reclaimUntil && !textArea.hasFocus() && reclaimEnabled)
+            textArea.requestFocusInWindow()
     }
 
     /** Only ever applied to a separate tool-window window. When the panel is docked the
