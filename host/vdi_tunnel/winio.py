@@ -191,11 +191,17 @@ class BgBackend:
         return img
 
     # --- input ---
-    def _post_key(self, vk, up):
+    def _key(self, vk, up):
+        # SENT, not posted, like the WM_CHARs in type_text: Windows delivers sent messages
+        # ahead of anything still sitting in the posted queue, so posted keys could be
+        # overtaken by the chars typed after them. Suspected 2026-09-19: a posted Ctrl+A/Backspace
+        # landing after the first typed chars would erase them (fits an ARQ retransmit of seq 0); a
+        # posted Enter can likewise land after the next line's chars. All-sent keeps order.
         sc = _sc(vk)
         msg = WM_KEYUP if up else WM_KEYDOWN
         lp = (sc << 16) | (0xC0000001 if up else 1)
-        user32.PostMessageW(self.ctx, msg, vk, lp)
+        res = ctypes.c_ulong(0)
+        user32.SendMessageTimeoutW(self.ctx, msg, vk, lp, SMTO_ABORTIFHUNG, 1000, ctypes.byref(res))
 
     def focus_click(self, gx, gy):
         # grab-image coords -> screen -> ICA display client coords
@@ -236,8 +242,8 @@ class BgBackend:
         for ch in text:
             if ch == "\n":
                 # Enter as a real key event (raw), so the Swing textarea inserts a newline
-                self._post_key(VK_RETURN, False)
-                self._post_key(VK_RETURN, True)
+                self._key(VK_RETURN, False)
+                self._key(VK_RETURN, True)
             else:
                 # WM_CHAR carries the Unicode codepoint directly -> layout-independent, the
                 # analogue of the legacy KEYEVENTF_UNICODE path. lParam low word is the key
@@ -251,14 +257,14 @@ class BgBackend:
     def clear_field(self):
         # Ctrl+A then Backspace (delete selection) -- mirrors winput.clear_field, via raw keys.
         # Small settling gaps so the ICA client tracks the modifier state across the separate
-        # posted key events (Ctrl must still be down when A is pressed).
-        self._post_key(VK_CONTROL, False); time.sleep(0.02)
-        self._post_key(VK_A, False); time.sleep(0.02)
-        self._post_key(VK_A, True); time.sleep(0.02)
-        self._post_key(VK_CONTROL, True)
+        # key events (Ctrl must still be down when A is pressed).
+        self._key(VK_CONTROL, False); time.sleep(0.02)
+        self._key(VK_A, False); time.sleep(0.02)
+        self._key(VK_A, True); time.sleep(0.02)
+        self._key(VK_CONTROL, True)
         time.sleep(0.05)
-        self._post_key(VK_BACK, False)
-        self._post_key(VK_BACK, True)
+        self._key(VK_BACK, False)
+        self._key(VK_BACK, True)
         time.sleep(0.05)
 
 
