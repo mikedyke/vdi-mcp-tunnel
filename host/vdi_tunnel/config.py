@@ -4,15 +4,19 @@ from dataclasses import dataclass
 class Config:
     # --- IDE MCP endpoint is reached by the BRIDGE (inside the VDI), not the host. ---
     # --- Transport / codec ---
-    symbol_size: int = 512          # source-block size = repair-symbol size (bytes).
-                                    # MUST equal the bridge TunnelController.symbolSize.
+    symbol_size: int = 692          # source-block size = repair-symbol size (bytes).
+                                    # Downlink no longer depends on this: the decoder uses
+                                    # len(symbol) from the frame, so a bridge with a different
+                                    # symbolSize still decodes. Kept as documentation of the
+                                    # current bridge value (and for encode-side tooling).
     frame_payload: int = 200        # max compressed bytes per uplink chunk
     dmax: int = 8                   # max LT repair degree
     # --- QR / capture (host decode auto-detects version/ECC; these document the bridge) ---
-    qr_version: int = 18            # ~V18 byte-mode holds a 512B symbol + header at ECC M
-    qr_ecc: str = "M"
+    qr_version: int = 18            # V18 byte-mode holds a 692B symbol + 24B header at ECC L
+    qr_ecc: str = "L"               # raised from M 2026-09-11: +35% payload, same geometry
     module_min_px: int = 3
-    downlink_fps: int = 3
+    downlink_fps: int = 6           # documents the bridge Timer(1000/6); the read loop grabs
+                                    # as fast as it can rather than pacing off this
     downlink_timeout_s: int = 120   # large replies span many cycled QR frames
     settle_stable_frames: int = 2   # identical grabs before decoding
     # --- Heartbeat / ARQ ---

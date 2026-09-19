@@ -8,7 +8,19 @@ import java.util.concurrent.atomic.AtomicReference
  *  The panel polls [heartbeatImage] and [currentDownlinkImage] to paint. */
 class TunnelController(
     private val ide: McpLocalClient,
-    private val symbolSize: Int = 512,        // MUST equal host Config.symbol_size
+    // 692: its frame (692 + 24B header/CRC = 716B) still encodes inside the SAME 93-module
+    // matrix (V18 + margin) at ECC L that a 536B frame needed at ECC M. Measured with the
+    // bundled ZXing, not taken from a capacity table: 717B is the last frame that fits, 718B
+    // spills to V19. Raised from 512 on 2026-09-11 with the ECC change in QrRenderer:
+    // +35% downlink throughput at identical QR geometry and frame rate.
+    //
+    // If a future zxing emits an extra ECI segment and this spills to a 97-module matrix,
+    // nothing breaks -- px/module at a 447px panel only drops 4.81 -> 4.61, still well above
+    // the ~4 the host needs. The failure mode is gradual, not a cliff.
+    //
+    // The host derives symbol size from len(symbol) on the wire, so the two sides do NOT have
+    // to be upgraded in lockstep.
+    private val symbolSize: Int = 692,
     private val dmax: Int = 8,
     private val qrPx: Int = 720,              // render resolution; panel scales to fit
     private val repairRatio: Double = 0.25,   // extra repair symbols beyond K

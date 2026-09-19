@@ -8,9 +8,19 @@ import java.awt.image.BufferedImage
 
 /** Renders raw frame bytes to a QR BufferedImage in BYTE mode (Latin-1 = 1 char/byte). */
 object QrRenderer {
-    // ECC M (15%): the screen->capture path is clean, and the LT fountain + CRC already
-    // recover dropped/garbled frames, so we spend QR capacity on payload instead of on Q.
-    fun render(frame: ByteArray, sizePx: Int, ecc: ErrorCorrectionLevel = ErrorCorrectionLevel.M): BufferedImage {
+    // ECC L (7%), raised from M (15%) on 2026-09-11 to buy payload.
+    //
+    // Measured with this ZXing (3.5.3, ISO-8859-1 hint, margin 2), same physical QR size --
+    // V18, 89 modules + 2-module quiet zone each side = 93-module matrix:
+    //     ECC M -> 536 byte frame (512B symbol)
+    //     ECC L -> 716 byte frame (692B symbol)   = +35% throughput, identical geometry
+    // At ECC L, 717 bytes is the last frame that stays at 93; 718 spills to V19 (97).
+    //
+    // Spending capacity on payload rather than redundancy is right here because the QR is a
+    // crisp *rendered* image, not a photograph, and because a corrupted frame is already
+    // cheap: it fails CRC, is discarded, and the LT fountain simply consumes the next symbol.
+    // Error correction inside the QR duplicates recovery the transport already provides.
+    fun render(frame: ByteArray, sizePx: Int, ecc: ErrorCorrectionLevel = ErrorCorrectionLevel.L): BufferedImage {
         val text = String(frame, Charsets.ISO_8859_1)
         val hints = mapOf(
             EncodeHintType.ERROR_CORRECTION to ecc,

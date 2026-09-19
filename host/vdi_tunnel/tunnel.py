@@ -119,7 +119,12 @@ class Tunnel:
                     continue        # heartbeat QR or a stale generation
                 if dec is None:
                     meta = f
-                    dec = Decoder(f["k"], f["payload_len"], self.cfg.symbol_size, self.cfg.dmax)
+                    # Symbol size comes from the frame, not from config: the bridge pads
+                    # every symbol to its own symbolSize, so len() is authoritative. This
+                    # decouples the two sides -- a bridge that raises its symbol size (e.g.
+                    # for denser QR) keeps working against an unchanged host instead of
+                    # silently decoding garbage on a constant mismatch.
+                    dec = Decoder(f["k"], f["payload_len"], len(f["symbol"]), self.cfg.dmax)
                 if f["symbol_id"] in seen:
                     continue
                 seen.add(f["symbol_id"])

@@ -144,7 +144,9 @@ class TunnelPanel(
             // sizing guide: a rectangle just OUTSIDE the QR quiet zone (never touches the code)
             // + a px/module readout. Green = dense enough for the host to capture; amber = the
             // window is too small, make it wider/taller until this turns green.
-            val pxPerModule = qrS / 93f          // ~V18 (89 modules) + 2-module quiet zone each side
+            // 93 = 89 modules (V18: a 536B ECC-M frame and a 716B ECC-L frame both land here,
+            // measured) + the 2-module quiet zone each side.
+            val pxPerModule = qrS / 93f
             val ok = pxPerModule >= 4f
             g2.color = if (ok) Color(0, 150, 0) else Color(210, 140, 0)
             g2.stroke = BasicStroke(2f)
