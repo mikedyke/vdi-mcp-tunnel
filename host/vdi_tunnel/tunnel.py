@@ -71,7 +71,11 @@ class Tunnel:
     def _focus_textarea(self, calib):
         """Click the textarea and confirm the panel's focus bar goes green before typing.
         Retries the click a few times; raises if the panel never reports focus so we never
-        type keystrokes into the void (or the wrong window)."""
+        type keystrokes into the void (or the wrong window).
+        Skips the click when the textarea is already focused: every click (even a posted one)
+        makes the Citrix client yank the host's real cursor into its window."""
+        if V.is_focused(self.io.grab(), calib):
+            return
         for attempt in range(5):
             self.io.focus_click(*calib.textarea_point())
             time.sleep(0.15)

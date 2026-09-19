@@ -202,9 +202,33 @@ class BgBackend:
         ox, oy = _win_origin(self.top)
         cx, cy = _screen_to_client(self.ctx, ox + int(gx), oy + int(gy))
         lp = _lp_xy(cx, cy)
+        # The ICA client reacts to WM_LBUTTONDOWN by clamping the host's REAL cursor into the
+        # session window (measured 2026-09-19: (3893,1029) -> (2262,1029), foreground or not;
+        # MOVE and UP alone don't). It does so asynchronously, a few ms after the message is
+        # handled, sometimes with a brief ClipCursor and a second nudge ~60 ms later -- so an
+        # immediate restore loses the race. Guard for a short window instead and put the cursor
+        # back whenever it was yanked into the window from outside it.
+        saved = wintypes.POINT()
+        user32.GetCursorPos(ctypes.byref(saved))
         user32.PostMessageW(self.ctx, WM_MOUSEMOVE, 0, lp)
         user32.PostMessageW(self.ctx, WM_LBUTTONDOWN, MK_LBUTTON, lp)
         user32.PostMessageW(self.ctx, WM_LBUTTONUP, 0, lp)
+        self._guard_cursor(saved.x, saved.y)
+
+    def _guard_cursor(self, sx, sy, dur=0.3):
+        r = wintypes.RECT()
+        user32.GetWindowRect(self.top, ctypes.byref(r))
+        inside = lambda x, y: r.left <= x < r.right and r.top <= y < r.bottom
+        if inside(sx, sy):
+            return          # cursor already over the session window: the clamp is a no-op
+        p = wintypes.POINT()
+        end = time.perf_counter() + dur
+        while time.perf_counter() < end:
+            user32.GetCursorPos(ctypes.byref(p))
+            if (p.x, p.y) != (sx, sy) and inside(p.x, p.y):
+                user32.ClipCursor(None)      # drop a transient clip, or SetCursorPos is clamped
+                user32.SetCursorPos(sx, sy)
+            time.sleep(0.002)
 
     def type_text(self, text):
         gap = self.cfg.key_interval_ms / 1000.0
