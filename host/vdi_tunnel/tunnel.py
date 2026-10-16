@@ -95,16 +95,25 @@ class Tunnel:
         return False
 
     # ---------- downlink ----------
-    def _read_response(self, calib, gen_id) -> bytes:
+    def _read_response(self, calib, gen_id, on_wait=None) -> bytes:
         """Read the LT-coded RESP QR animation. The bridge cycles a fixed set of QR
         frames; we grab as fast as we can, decode every QR in the whole panel, and feed
         each distinct symbol to the fountain decoder until it reconstructs. No stable()
-        gating — the QR is a crisp rendered image, and gating fought the animation."""
+        gating — the QR is a crisp rendered image, and gating fought the animation.
+
+        While the heartbeat reports FORWARDING (the IDE is still working on the request) and
+        no reply symbol has arrived yet, the deadline rolls forward — reading the heartbeat is
+        a passive screen grab, so waiting costs no input — up to cfg.forwarding_max_s. `on_wait`
+        (elapsed_s, message) is called about every 15 s of that wait so the caller can emit
+        progress."""
         dec = None; meta = None
         seen: set[int] = set()
         state = None        # last bridge state seen, from the heartbeat QR in the same grab
-        deadline = time.time() + self.cfg.downlink_timeout_s
+        start = time.time()
+        hard_deadline = start + self.cfg.forwarding_max_s
+        deadline = start + self.cfg.downlink_timeout_s
         last_log = time.time()
+        last_wait = 0.0
         while time.time() < deadline:
             for raw in V.read_all(self.io.grab(), calib):
                 try:
@@ -138,6 +147,13 @@ class Tunnel:
                         dec = None; meta = None; seen.clear()
                         continue
                     return P.decompress(meta["codec"], payload)
+            if dec is None and P.STATE_NAMES.get(state) == "FORWARDING":
+                now = time.time()
+                deadline = min(hard_deadline, now + self.cfg.downlink_timeout_s)
+                if on_wait and now - last_wait >= 15:
+                    last_wait = now
+                    on_wait(now - start, "IDE still working on the request (bridge FORWARDING); "
+                                         "if this looks stuck, check the VDI for a modal dialog")
             if dec is not None and time.time() - last_log > 3:
                 last_log = time.time()
                 # progress breadcrumb for large replies (K symbols needed)
@@ -157,9 +173,10 @@ class Tunnel:
             f"downlink timeout ({len(seen)} symbols seen, need k={need}, bridge={where}){hint}")
 
     # ---------- public ----------
-    def request(self, mcp_json: bytes) -> bytes:
-        """Send a serialized MCP JSON-RPC message, return the serialized reply."""
+    def request(self, mcp_json: bytes, on_wait=None) -> bytes:
+        """Send a serialized MCP JSON-RPC message, return the serialized reply.
+        `on_wait(elapsed_s, message)` is called periodically while the IDE is busy."""
         calib = self._calibrate()
         gen_id = next(self._gen) & 0xFFFF
         self._send_request(calib, gen_id, mcp_json)
-        return self._read_response(calib, gen_id)
+        return self._read_response(calib, gen_id, on_wait)

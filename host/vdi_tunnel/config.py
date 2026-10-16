@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 
 @dataclass
@@ -18,6 +19,10 @@ class Config:
     downlink_fps: int = 6           # documents the bridge Timer(1000/6); the read loop grabs
                                     # as fast as it can rather than pacing off this
     downlink_timeout_s: int = 120   # large replies span many cycled QR frames
+    forwarding_max_s: int = 1800    # while the heartbeat says FORWARDING (IDE still working on
+                                    #   the request) the downlink deadline keeps rolling forward
+                                    #   up to this hard cap, so slow IDE calls (builds, test runs)
+                                    #   report back instead of timing out at downlink_timeout_s
     settle_stable_frames: int = 2   # identical grabs before decoding
     # --- Heartbeat / ARQ ---
     heartbeat_timeout_ms: int = 3000
@@ -25,9 +30,12 @@ class Config:
     key_interval_ms: int = 12       # inter-key delay; tune to session lag
     ack_timeout_ms: int = 1500
     # --- Capture / input backend ---
-    background_mode: bool = True     # True: PrintWindow capture + posted messages to the ICA
+    background_mode: bool = os.environ.get("VDI_TUNNEL_BACKGROUND", "1") != "0"
+                                     # True: PrintWindow capture + posted messages to the ICA
                                      #   display child (reads through occlusion, never steals
-                                     #   focus/cursor). False: legacy mss grab + SendInput.
+                                     #   focus/cursor). False: legacy mss grab + SendInput
+                                     #   (needed for non-Citrix sessions, e.g. Windows 365 /
+                                     #   RDP; set env VDI_TUNNEL_BACKGROUND=0).
     ica_window_title_substr: str = ""  # optional filter to pick the right Citrix session window
                                      #   when several are open (matched against the title, case-
                                      #   insensitive). Empty = first window with a CtxICADisp child.
