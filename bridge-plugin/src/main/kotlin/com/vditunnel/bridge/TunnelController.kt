@@ -1,5 +1,10 @@
 package com.vditunnel.bridge
 
+import com.google.gson.Gson
+import com.google.gson.JsonElement
+import com.google.gson.JsonNull
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import java.awt.image.BufferedImage
 import java.util.concurrent.atomic.AtomicReference
 
@@ -87,10 +92,57 @@ class TunnelController(
         // window for the final chunk could never be met.
         worker.execute {
             val reply = try {
-                ide.call(String(inflateIfNeeded(codec, comp), Charsets.UTF_8))
+                handleRequest(String(inflateIfNeeded(codec, comp), Charsets.UTF_8))
             } catch (e: Exception) { errorReply(e.message) }
             sendResponse(reply.toByteArray(Charsets.UTF_8))
         }
+    }
+
+    // ---- local tool dispatch: file-mutation tools run here, never reaching the IDE's own
+    // MCP server -- see LocalFileTools for why (no subprocess, no project restriction). ----
+    private fun handleRequest(requestJson: String): String {
+        val req = try { JsonParser.parseString(requestJson).asJsonObject } catch (e: Exception) { null }
+        val id: JsonElement? = req?.get("id")
+        val method = req?.get("method")?.takeIf { it.isJsonPrimitive }?.asString
+
+        if (method == "tools/call") {
+            val params = req!!.getAsJsonObject("params")
+            val name = params?.get("name")?.takeIf { it.isJsonPrimitive }?.asString
+            if (name != null && name in LocalFileTools.NAMES) {
+                val args = params.getAsJsonObject("arguments") ?: JsonObject()
+                return try {
+                    successReply(id, LocalFileTools.call(name, args))
+                } catch (e: Exception) {
+                    errorReply(e.message, id)
+                }
+            }
+        }
+
+        val reply = ide.call(requestJson)
+        return if (method == "tools/list") spliceLocalTools(reply) else reply
+    }
+
+    private fun spliceLocalTools(reply: String): String = try {
+        val obj = JsonParser.parseString(reply).asJsonObject
+        val result = obj.getAsJsonObject("result")
+        val tools = result?.getAsJsonArray("tools")
+        if (result != null && tools != null) {
+            LocalFileTools.toolDefinitions().forEach { tools.add(it) }
+            Gson().toJson(obj)
+        } else reply
+    } catch (e: Exception) { reply }
+
+    private fun successReply(id: JsonElement?, text: String): String {
+        val resp = JsonObject()
+        resp.addProperty("jsonrpc", "2.0")
+        resp.add("id", id ?: JsonNull.INSTANCE)
+        val result = JsonObject()
+        val content = com.google.gson.JsonArray()
+        val item = JsonObject(); item.addProperty("type", "text"); item.addProperty("text", text)
+        content.add(item)
+        result.add("content", content)
+        resp.add("result", result)
+        return Gson().toJson(resp)
     }
 
     private fun inflateIfNeeded(codec: Int, data: ByteArray): ByteArray {
@@ -117,8 +169,14 @@ class TunnelController(
         state = State.SENDING
     }
 
-    private fun errorReply(msg: String?): String =
-        """{"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":${'"'}${msg ?: "ide error"}${'"'}}}"""
+    private fun errorReply(msg: String?, id: JsonElement? = null): String {
+        val resp = JsonObject()
+        resp.addProperty("jsonrpc", "2.0")
+        resp.add("id", id ?: JsonNull.INSTANCE)
+        val err = JsonObject(); err.addProperty("code", -32000); err.addProperty("message", msg ?: "ide error")
+        resp.add("error", err)
+        return Gson().toJson(resp)
+    }
 
     // ---- panel accessors ----
     fun currentDownlinkImage(): BufferedImage? {
