@@ -2,12 +2,17 @@ package com.vditunnel.bridge
 
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
+import java.nio.file.FileSystems
+import java.nio.file.FileVisitResult
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.BasicFileAttributes
 import java.security.MessageDigest
 import java.util.Base64
 
@@ -32,6 +37,7 @@ object LocalFileTools {
     val NAMES: Set<String> = setOf(
         "write_file", "patch_file", "move_file", "copy_file", "hash_file", "apply_patch",
         "delete_file", "create_directory", "stat_file", "list_directory", "read_file_raw",
+        "find_files", "grep_files",
     )
 
     fun call(name: String, args: JsonObject): String = when (name) {
@@ -46,6 +52,8 @@ object LocalFileTools {
         "create_directory" -> createDirectory(args)
         "stat_file" -> statFile(args)
         "list_directory" -> listDirectory(args)
+        "find_files" -> findFiles(args)
+        "grep_files" -> grepFiles(args)
         else -> throw IllegalArgumentException("unknown local tool: $name")
     }
 
@@ -191,15 +199,132 @@ object LocalFileTools {
         val limit = 2000
         val lines = mutableListOf<String>()
         var truncated = false
-        Files.walk(path, maxDepth).use { stream ->
-            stream.sorted().forEach { p ->
-                if (p == path) return@forEach
-                if (lines.size >= limit) { truncated = true; return@forEach }
-                val rel = path.relativize(p).toString()
-                if (Files.isDirectory(p)) lines.add("D $rel") else lines.add("F $rel ${Files.size(p)}")
+        walkEntries(path, maxDepth) { p, isDir ->
+            if (lines.size >= limit) { truncated = true; return@walkEntries }
+            val rel = path.relativize(p).toString()
+            lines.add(if (isDir) "D $rel" else "F $rel ${Files.size(p)}")
+        }
+        return lines.sorted().joinToString("\n") + if (truncated) "\n... truncated at $limit entries" else ""
+    }
+
+    private fun findFiles(args: JsonObject): String {
+        val root = Path.of(str(args, "root"))
+        if (!Files.exists(root)) throw IllegalStateException("not found: $root")
+        if (!Files.isDirectory(root)) throw IllegalStateException("not a directory: $root")
+        val pattern = str(args, "pattern")
+        val matchMode = args.get("matchMode")?.takeIf { it.isJsonPrimitive }?.asString ?: "substring"
+        val matchAgainst = args.get("matchAgainst")?.takeIf { it.isJsonPrimitive }?.asString ?: "name"
+        val typeFilter = args.get("type")?.takeIf { it.isJsonPrimitive }?.asString ?: "any"
+        val recursive = bool(args, "recursive", true)
+        val maxDepth = if (!recursive) 1
+            else args.get("maxDepth")?.takeIf { it.isJsonPrimitive }?.asInt ?: Int.MAX_VALUE
+        val caseSensitive = bool(args, "caseSensitive", false)
+        val maxResults = args.get("maxResults")?.takeIf { it.isJsonPrimitive }?.asInt ?: 2000
+
+        val matches: (String) -> Boolean = when (matchMode) {
+            "glob" -> {
+                val pm = FileSystems.getDefault().getPathMatcher("glob:$pattern")
+                { s -> pm.matches(Path.of(s)) }
+            }
+            "regex" -> {
+                val opts = if (caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE)
+                val re = Regex(pattern, opts)
+                { s -> re.containsMatchIn(s) }
+            }
+            else -> { s -> s.contains(pattern, ignoreCase = !caseSensitive) }
+        }
+
+        val results = mutableListOf<String>()
+        var truncated = false
+        walkEntries(root, maxDepth) { p, isDir ->
+            if (typeFilter == "file" && isDir) return@walkEntries
+            if (typeFilter == "directory" && !isDir) return@walkEntries
+            if (results.size >= maxResults) { truncated = true; return@walkEntries }
+            val rel = root.relativize(p).toString()
+            val candidate = if (matchAgainst == "path") rel else p.fileName.toString()
+            if (matches(candidate)) results.add(if (isDir) "D $rel" else "F $rel ${Files.size(p)}")
+        }
+        return results.sorted().joinToString("\n") + if (truncated) "\n... truncated at $maxResults results" else ""
+    }
+
+    private fun grepFiles(args: JsonObject): String {
+        val root = Path.of(str(args, "root"))
+        if (!Files.exists(root)) throw IllegalStateException("not found: $root")
+        val pattern = str(args, "pattern")
+        val regexMode = bool(args, "regex", false)
+        val caseSensitive = bool(args, "caseSensitive", true)
+        val filePattern = args.get("filePattern")?.takeIf { it.isJsonPrimitive }?.asString
+        val recursive = bool(args, "recursive", true)
+        val maxDepth = if (!recursive) 1
+            else args.get("maxDepth")?.takeIf { it.isJsonPrimitive }?.asInt ?: Int.MAX_VALUE
+        val maxMatches = args.get("maxMatches")?.takeIf { it.isJsonPrimitive }?.asInt ?: 500
+        val contextLines = args.get("contextLines")?.takeIf { it.isJsonPrimitive }?.asInt ?: 0
+
+        val lineMatches: (String) -> Boolean = if (regexMode) {
+            val opts = if (caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE)
+            val re = Regex(pattern, opts)
+            { line -> re.containsMatchIn(line) }
+        } else {
+            { line -> line.contains(pattern, ignoreCase = !caseSensitive) }
+        }
+
+        val targetIsDir = Files.isDirectory(root)
+        val fileMatcher = filePattern?.let { FileSystems.getDefault().getPathMatcher("glob:$it") }
+        val candidates = mutableListOf<Path>()
+        if (!targetIsDir) {
+            candidates.add(root)
+        } else {
+            walkEntries(root, maxDepth) { p, isDir ->
+                if (!isDir && (fileMatcher == null || fileMatcher.matches(Path.of(p.fileName.toString())))) {
+                    candidates.add(p)
+                }
             }
         }
-        return lines.joinToString("\n") + if (truncated) "\n... truncated at $limit entries" else ""
+
+        val results = mutableListOf<String>()
+        var truncated = false
+        outer@ for (file in candidates.sorted()) {
+            val lines = try {
+                Files.readAllLines(file, StandardCharsets.UTF_8)
+            } catch (e: Exception) {
+                continue // binary or unreadable -- skip, like grep -I
+            }
+            val label = if (targetIsDir) root.relativize(file).toString() else file.toString()
+            for ((idx, line) in lines.withIndex()) {
+                if (!lineMatches(line)) continue
+                if (results.size >= maxMatches) { truncated = true; break@outer }
+                if (contextLines > 0) {
+                    val from = maxOf(0, idx - contextLines)
+                    val to = minOf(lines.size - 1, idx + contextLines)
+                    for (ctx in from..to) {
+                        val sep = if (ctx == idx) ":" else "-"
+                        results.add("$label$sep${ctx + 1}: ${lines[ctx]}")
+                    }
+                    results.add("--")
+                } else {
+                    results.add("$label:${idx + 1}: $line")
+                }
+            }
+        }
+        return results.joinToString("\n") + if (truncated) "\n... truncated at $maxMatches matches" else ""
+    }
+
+    /** Error-tolerant directory walk: a permission-denied subdirectory is skipped rather than
+     *  aborting the whole call, unlike a plain Files.walk() stream. */
+    private fun walkEntries(root: Path, maxDepth: Int, visit: (Path, Boolean) -> Unit) {
+        Files.walkFileTree(root, emptySet(), maxDepth, object : SimpleFileVisitor<Path>() {
+            override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
+                if (dir != root) visit(dir, true)
+                return FileVisitResult.CONTINUE
+            }
+
+            override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                visit(file, false)
+                return FileVisitResult.CONTINUE
+            }
+
+            override fun visitFileFailed(file: Path, exc: IOException): FileVisitResult = FileVisitResult.CONTINUE
+        })
     }
 
     // ---- apply_patch: a minimal unified-diff applier, no git involved ----
@@ -429,6 +554,46 @@ object LocalFileTools {
                 "maxDepth" to prop("integer", "Max recursion depth when recursive=true. Default unlimited."),
             ),
             listOf("path"),
+        ),
+        tool(
+            "find_files",
+            "Finds files/directories under an absolute root by name or path, like Unix `find`. " +
+                "Error-tolerant (a permission-denied subdirectory is skipped, not fatal) and not " +
+                "restricted to the currently open project. Returns one 'D path' or 'F path size' " +
+                "line per match, capped at maxResults.",
+            obj(
+                "root" to prop("string", "Absolute directory to search under."),
+                "pattern" to prop("string", "What to match, interpreted per matchMode."),
+                "matchMode" to prop("string", "'substring' (default), 'glob' (e.g. '*.java'), or 'regex'."),
+                "matchAgainst" to prop("string", "Match against the entry's 'name' (default) or its relative 'path'."),
+                "type" to prop("string", "Restrict to 'file', 'directory', or 'any' (default)."),
+                "recursive" to prop("boolean", "Search subdirectories too. Default true."),
+                "maxDepth" to prop("integer", "Max recursion depth when recursive=true. Default unlimited."),
+                "caseSensitive" to prop("boolean", "Case-sensitive match. Default false."),
+                "maxResults" to prop("integer", "Cap on returned matches. Default 2000."),
+            ),
+            listOf("root", "pattern"),
+        ),
+        tool(
+            "grep_files",
+            "Searches file contents under an absolute root (or a single file) for a literal " +
+                "substring or regex, like Unix `grep -r`. Error-tolerant (permission-denied " +
+                "subdirectories are skipped) and not restricted to the currently open project. " +
+                "Files that aren't valid UTF-8 text are skipped, like `grep -I`. Returns one " +
+                "'path:line: text' line per match (or a context block if contextLines>0), capped " +
+                "at maxMatches.",
+            obj(
+                "root" to prop("string", "Absolute directory to search under, or a single absolute file path."),
+                "pattern" to prop("string", "Literal substring, or a regex if regex=true."),
+                "regex" to prop("boolean", "Treat pattern as a regular expression. Default false."),
+                "caseSensitive" to prop("boolean", "Case-sensitive match. Default true."),
+                "filePattern" to prop("string", "Optional glob filter on filename, e.g. '*.java'. Only used when root is a directory."),
+                "recursive" to prop("boolean", "Search subdirectories too. Default true."),
+                "maxDepth" to prop("integer", "Max recursion depth when recursive=true. Default unlimited."),
+                "contextLines" to prop("integer", "Lines of context before/after each match. Default 0."),
+                "maxMatches" to prop("integer", "Cap on returned matches. Default 500."),
+            ),
+            listOf("root", "pattern"),
         ),
     )
 
