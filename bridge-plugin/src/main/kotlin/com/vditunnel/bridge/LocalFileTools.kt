@@ -322,7 +322,10 @@ object LocalFileTools {
             }
 
             override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                visit(file, false)
+                // A directory sitting exactly at maxDepth (so it can't be descended into) is
+                // reported here, not via preVisitDirectory -- so "is it a directory" has to
+                // come from attrs, not from which callback fired.
+                visit(file, attrs.isDirectory)
                 return FileVisitResult.CONTINUE
             }
 
