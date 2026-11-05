@@ -27,7 +27,10 @@ import java.util.Base64
  * content from typed text, not to this plugin's own compiled code.
  */
 object LocalFileTools {
-    val NAMES: Set<String> = setOf("write_file", "patch_file", "move_file", "copy_file", "hash_file", "apply_patch")
+    val NAMES: Set<String> = setOf(
+        "write_file", "patch_file", "move_file", "copy_file", "hash_file", "apply_patch",
+        "delete_file", "create_directory", "stat_file", "list_directory",
+    )
 
     fun call(name: String, args: JsonObject): String = when (name) {
         "write_file" -> writeFile(args)
@@ -36,6 +39,10 @@ object LocalFileTools {
         "copy_file" -> relocate(args, move = false)
         "hash_file" -> hashFile(args)
         "apply_patch" -> applyPatch(args)
+        "delete_file" -> deleteFile(args)
+        "create_directory" -> createDirectory(args)
+        "stat_file" -> statFile(args)
+        "list_directory" -> listDirectory(args)
         else -> throw IllegalArgumentException("unknown local tool: $name")
     }
 
@@ -117,6 +124,62 @@ object LocalFileTools {
         }
         val hex = digest.digest().joinToString("") { "%02x".format(it) }
         return "size=$size sha256=$hex"
+    }
+
+    private fun deleteFile(args: JsonObject): String {
+        val path = Path.of(str(args, "path"))
+        val recursive = bool(args, "recursive", false)
+        if (!Files.exists(path)) throw IllegalStateException("not found: $path")
+        if (Files.isDirectory(path)) {
+            if (!recursive) {
+                Files.delete(path) // throws DirectoryNotEmptyException if non-empty, same as Remove-Item without -Recurse
+                return "deleted empty directory: $path"
+            }
+            var count = 0
+            Files.walk(path).use { stream ->
+                stream.sorted(Comparator.reverseOrder()).forEach { p -> Files.delete(p); count++ }
+            }
+            return "deleted directory recursively: $path ($count entries removed)"
+        }
+        Files.delete(path)
+        return "deleted file: $path"
+    }
+
+    private fun createDirectory(args: JsonObject): String {
+        val path = Path.of(str(args, "path"))
+        val existed = Files.isDirectory(path)
+        Files.createDirectories(path)
+        return if (existed) "directory already exists: $path" else "created directory: $path"
+    }
+
+    private fun statFile(args: JsonObject): String {
+        val path = Path.of(str(args, "path"))
+        if (!Files.exists(path)) return "exists=false"
+        val isDir = Files.isDirectory(path)
+        val size = if (isDir) -1 else Files.size(path)
+        val mtime = Files.getLastModifiedTime(path).toInstant().toString()
+        return "exists=true isDirectory=$isDir size=$size mtime=$mtime"
+    }
+
+    private fun listDirectory(args: JsonObject): String {
+        val path = Path.of(str(args, "path"))
+        if (!Files.exists(path)) throw IllegalStateException("not found: $path")
+        if (!Files.isDirectory(path)) throw IllegalStateException("not a directory: $path")
+        val recursive = bool(args, "recursive", false)
+        val maxDepth = if (!recursive) 1
+            else args.get("maxDepth")?.takeIf { it.isJsonPrimitive }?.asInt ?: Int.MAX_VALUE
+        val limit = 2000
+        val lines = mutableListOf<String>()
+        var truncated = false
+        Files.walk(path, maxDepth).use { stream ->
+            stream.sorted().forEach { p ->
+                if (p == path) return@forEach
+                if (lines.size >= limit) { truncated = true; return@forEach }
+                val rel = path.relativize(p).toString()
+                if (Files.isDirectory(p)) lines.add("D $rel") else lines.add("F $rel ${Files.size(p)}")
+            }
+        }
+        return lines.joinToString("\n") + if (truncated) "\n... truncated at $limit entries" else ""
     }
 
     // ---- apply_patch: a minimal unified-diff applier, no git involved ----
@@ -293,6 +356,44 @@ object LocalFileTools {
                 "diffText" to prop("string", "The unified diff text."),
             ),
             listOf("baseDir", "diffText"),
+        ),
+        tool(
+            "delete_file",
+            "Deletes a file or (with recursive=true) a directory tree at an absolute path, via " +
+                "plain java.nio.file.Files calls in the plugin process -- no PowerShell/cmd. " +
+                "Without recursive, deleting a non-empty directory fails rather than silently " +
+                "removing its contents, same as Remove-Item without -Recurse.",
+            obj(
+                "path" to prop("string", "Absolute path to delete."),
+                "recursive" to prop("boolean", "Delete a directory and everything under it. Default false."),
+            ),
+            listOf("path"),
+        ),
+        tool(
+            "create_directory",
+            "Creates a directory (and any missing parents) at an absolute path -- java.nio.file.Files.createDirectories, idempotent.",
+            obj("path" to prop("string", "Absolute directory path to create.")),
+            listOf("path"),
+        ),
+        tool(
+            "stat_file",
+            "Reports whether an absolute path exists and, if so, whether it's a directory, its size " +
+                "and its last-modified time -- a quick existence/metadata check without reading content.",
+            obj("path" to prop("string", "Absolute path to inspect.")),
+            listOf("path"),
+        ),
+        tool(
+            "list_directory",
+            "Lists the entries of a directory at an absolute path (one 'D name' or 'F name size' " +
+                "line per entry, capped at 2000 lines) -- plain filenames, no box-drawing tree art, " +
+                "so it can't hit the cp1252/Unicode console-encoding crash the IDE's own " +
+                "list_directory_tree tool has. Non-recursive by default.",
+            obj(
+                "path" to prop("string", "Absolute directory path to list."),
+                "recursive" to prop("boolean", "List subdirectories' contents too. Default false."),
+                "maxDepth" to prop("integer", "Max recursion depth when recursive=true. Default unlimited."),
+            ),
+            listOf("path"),
         ),
     )
 
