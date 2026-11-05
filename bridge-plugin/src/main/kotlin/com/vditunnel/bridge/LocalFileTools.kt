@@ -1,6 +1,5 @@
 package com.vditunnel.bridge
 
-import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -37,7 +36,7 @@ object LocalFileTools {
     val NAMES: Set<String> = setOf(
         "write_file", "patch_file", "move_file", "copy_file", "hash_file", "apply_patch",
         "delete_file", "create_directory", "stat_file", "list_directory", "read_file_raw",
-        "find_files", "grep_files",
+        "find_files", "grep_files", "hash_tree",
     )
 
     fun call(name: String, args: JsonObject): String = when (name) {
@@ -54,6 +53,7 @@ object LocalFileTools {
         "list_directory" -> listDirectory(args)
         "find_files" -> findFiles(args)
         "grep_files" -> grepFiles(args)
+        "hash_tree" -> hashTree(args)
         else -> throw IllegalArgumentException("unknown local tool: $name")
     }
 
@@ -152,6 +152,36 @@ object LocalFileTools {
         }
         val hex = digest.digest().joinToString("") { "%02x".format(it) }
         return "size=$size sha256=$hex"
+    }
+
+    private fun hashTree(args: JsonObject): String {
+        val root = Path.of(str(args, "root"))
+        if (!Files.exists(root)) throw IllegalStateException("not found: $root")
+        if (!Files.isDirectory(root)) throw IllegalStateException("not a directory: $root")
+        val pattern = args.get("pattern")?.takeIf { it.isJsonPrimitive }?.asString
+        val fileMatcher = pattern?.let { FileSystems.getDefault().getPathMatcher("glob:$it") }
+        val maxFiles = args.get("maxFiles")?.takeIf { it.isJsonPrimitive }?.asInt ?: 5000
+
+        val results = mutableListOf<String>()
+        var truncated = false
+        walkEntries(root, Int.MAX_VALUE) { p, isDir ->
+            if (isDir) return@walkEntries
+            if (fileMatcher != null && !fileMatcher.matches(Path.of(p.fileName.toString()))) return@walkEntries
+            if (results.size >= maxFiles) { truncated = true; return@walkEntries }
+            val rel = root.relativize(p).toString()
+            val digest = MessageDigest.getInstance("SHA-256")
+            Files.newInputStream(p).use { input ->
+                val buf = ByteArray(8192)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    digest.update(buf, 0, n)
+                }
+            }
+            val hex = digest.digest().joinToString("") { "%02x".format(it) }
+            results.add("$rel ${Files.size(p)} $hex")
+        }
+        return results.sorted().joinToString("\n") + if (truncated) "\n... truncated at $maxFiles files" else ""
     }
 
     private fun deleteFile(args: JsonObject): String {
@@ -601,32 +631,18 @@ object LocalFileTools {
             ),
             listOf("root", "pattern"),
         ),
+        tool(
+            "hash_tree",
+            "Hashes every file under an absolute root in one call, instead of one hash_file " +
+                "round trip per file -- the biggest round-trip-count win for re-verifying a large " +
+                "synced tree. Returns one 'relativePath size sha256' line per file, capped at " +
+                "maxFiles. Optionally filtered to files matching a glob.",
+            obj(
+                "root" to prop("string", "Absolute directory to hash."),
+                "pattern" to prop("string", "Optional glob filter on filename, e.g. '*.java'."),
+                "maxFiles" to prop("integer", "Cap on files hashed. Default 5000."),
+            ),
+            listOf("root"),
+        ),
     )
-
-    private fun tool(name: String, description: String, properties: JsonObject, required: List<String>): JsonObject {
-        val t = JsonObject()
-        t.addProperty("name", name)
-        t.addProperty("description", description)
-        val schema = JsonObject()
-        schema.addProperty("type", "object")
-        schema.add("properties", properties)
-        val req = JsonArray()
-        required.forEach { req.add(it) }
-        schema.add("required", req)
-        t.add("inputSchema", schema)
-        return t
-    }
-
-    private fun prop(type: String, description: String): JsonObject {
-        val p = JsonObject()
-        p.addProperty("type", type)
-        p.addProperty("description", description)
-        return p
-    }
-
-    private fun obj(vararg pairs: Pair<String, JsonObject>): JsonObject {
-        val o = JsonObject()
-        pairs.forEach { (k, v) -> o.add(k, v) }
-        return o
-    }
 }

@@ -108,10 +108,15 @@ class TunnelController(
         if (method == "tools/call") {
             val params = req!!.getAsJsonObject("params")
             val name = params?.get("name")?.takeIf { it.isJsonPrimitive }?.asString
-            if (name != null && name in LocalFileTools.NAMES) {
+            val handler: ((String, JsonObject) -> String)? = when {
+                name != null && name in LocalFileTools.NAMES -> LocalFileTools::call
+                name != null && name in ProcessTools.NAMES -> ProcessTools::call
+                else -> null
+            }
+            if (name != null && handler != null) {
                 val args = params.getAsJsonObject("arguments") ?: JsonObject()
                 return try {
-                    successReply(id, LocalFileTools.call(name, args))
+                    successReply(id, handler(name, args))
                 } catch (e: Exception) {
                     errorReply(e.message, id)
                 }
@@ -128,6 +133,7 @@ class TunnelController(
         val tools = result?.getAsJsonArray("tools")
         if (result != null && tools != null) {
             LocalFileTools.toolDefinitions().forEach { tools.add(it) }
+            ProcessTools.toolDefinitions().forEach { tools.add(it) }
             Gson().toJson(obj)
         } else reply
     } catch (e: Exception) { reply }
