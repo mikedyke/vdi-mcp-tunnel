@@ -2,6 +2,8 @@ package com.vditunnel.bridge
 
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -29,11 +31,12 @@ import java.util.Base64
 object LocalFileTools {
     val NAMES: Set<String> = setOf(
         "write_file", "patch_file", "move_file", "copy_file", "hash_file", "apply_patch",
-        "delete_file", "create_directory", "stat_file", "list_directory",
+        "delete_file", "create_directory", "stat_file", "list_directory", "read_file_raw",
     )
 
     fun call(name: String, args: JsonObject): String = when (name) {
         "write_file" -> writeFile(args)
+        "read_file_raw" -> readFileRaw(args)
         "patch_file" -> patchFile(args)
         "move_file" -> relocate(args, move = true)
         "copy_file" -> relocate(args, move = false)
@@ -69,6 +72,23 @@ object LocalFileTools {
             str(args, "text").toByteArray(StandardCharsets.UTF_8)
         Files.write(path, bytes)
         return "wrote ${bytes.size} bytes to $path"
+    }
+
+    private fun readFileRaw(args: JsonObject): String {
+        val path = Path.of(str(args, "path"))
+        if (!Files.exists(path)) throw IllegalStateException("not found: $path")
+        if (Files.isDirectory(path)) throw IllegalStateException("is a directory: $path")
+        val asBase64 = bool(args, "asBase64", false)
+        val bytes = Files.readAllBytes(path)
+        if (asBase64) return Base64.getEncoder().encodeToString(bytes)
+        val decoder = StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+        return try {
+            decoder.decode(ByteBuffer.wrap(bytes)).toString()
+        } catch (e: Exception) {
+            throw IllegalStateException("not valid UTF-8 text (${bytes.size} bytes) -- retry with asBase64=true")
+        }
     }
 
     private fun patchFile(args: JsonObject): String {
@@ -286,6 +306,21 @@ object LocalFileTools {
     // ---- tools/list schema entries, spliced into the IDE's own list ----
 
     fun toolDefinitions(): List<JsonObject> = listOf(
+        tool(
+            "read_file_raw",
+            "Reads a file's full content at an absolute path, in the plugin process -- no " +
+                "subprocess, no project restriction, and no risk of the mojibake/encoding loss the " +
+                "IDE's own read_file can show on non-ASCII content. Returns UTF-8 text by default; " +
+                "pass asBase64=true for binary files or if text decoding fails. Distinct from (does " +
+                "not replace) the IDE's own read_file, which offers line-numbered/range modes for " +
+                "source inside a project -- use that for everyday source reading, this one for an " +
+                "exact byte-for-byte read of any absolute path.",
+            obj(
+                "path" to prop("string", "Absolute path to read."),
+                "asBase64" to prop("boolean", "Return base64-encoded bytes instead of UTF-8 text. Default false."),
+            ),
+            listOf("path"),
+        ),
         tool(
             "write_file",
             "Writes text or binary (base64) content directly to an absolute path via plain " +
