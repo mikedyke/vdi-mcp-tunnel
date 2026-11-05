@@ -224,14 +224,16 @@ object LocalFileTools {
         val matches: (String) -> Boolean = when (matchMode) {
             "glob" -> {
                 val pm = FileSystems.getDefault().getPathMatcher("glob:$pattern")
-                { s -> pm.matches(Path.of(s)) }
+                val fn: (String) -> Boolean = { s -> pm.matches(Path.of(s)) }
+                fn
             }
             "regex" -> {
                 val opts = if (caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE)
                 val re = Regex(pattern, opts)
-                { s -> re.containsMatchIn(s) }
+                val fn: (String) -> Boolean = { s -> re.containsMatchIn(s) }
+                fn
             }
-            else -> { s -> s.contains(pattern, ignoreCase = !caseSensitive) }
+            else -> { s: String -> s.contains(pattern, ignoreCase = !caseSensitive) }
         }
 
         val results = mutableListOf<String>()
@@ -263,9 +265,10 @@ object LocalFileTools {
         val lineMatches: (String) -> Boolean = if (regexMode) {
             val opts = if (caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE)
             val re = Regex(pattern, opts)
-            { line -> re.containsMatchIn(line) }
+            val fn: (String) -> Boolean = { line -> re.containsMatchIn(line) }
+            fn
         } else {
-            { line -> line.contains(pattern, ignoreCase = !caseSensitive) }
+            { line: String -> line.contains(pattern, ignoreCase = !caseSensitive) }
         }
 
         val targetIsDir = Files.isDirectory(root)
